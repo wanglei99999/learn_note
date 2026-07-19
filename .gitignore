@@ -1,0 +1,12 @@
+# Claude Code 本地配置
+.claude/settings.local.json
+**/.claude/settings.local.json
+**/.impeccable/
+
+# Obsidian 本地工作区配置
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+
+# 系统文件
+Thumbs.db
+.DS_Store
