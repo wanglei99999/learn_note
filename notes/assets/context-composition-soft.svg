@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 900" width="960" height="900">
+  <style>text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, 'PingFang SC', 'Microsoft YaHei', 'Microsoft JhengHei', 'SimHei', sans-serif;}</style>
+  <rect width="960" height="900" fill="#efe9df"/>
+  <text x="480" y="50" text-anchor="middle" fill="#1a1a1a" font-size="26" font-weight="700">上下文工程 · 上下文的组成</text>
+  <text x="480" y="78" text-anchor="middle" fill="#6f6a61" font-size="14">LLM 每次推理读取的全部 token —— 目标是找到最小的高信号集合</text>
+  <rect x="250" y="100" width="460" height="748" rx="16" ry="16" fill="none" stroke="#c9c3b6" stroke-width="1.4" stroke-dasharray="6,5"/>
+  <text x="260" y="91" fill="#6f6a61" font-size="13" font-weight="600" letter-spacing="0.05em">上下文窗口 · CONTEXT WINDOW</text>
+  <rect x="278" y="122" width="404" height="76" rx="12" ry="12" fill="#dbe7f6" stroke="#3f74c9" stroke-width="1.6"/>
+  <path d="M312,196 L312,212 L330,196 Z" fill="#dbe7f6"/>
+  <text x="480" y="153" text-anchor="middle" fill="#3f74c9" font-size="16" font-weight="700">系统提示</text>
+  <text x="480" y="176" text-anchor="middle" fill="#33322e" font-size="13">期望输出 · 结果限制 · 任务要求</text>
+  <rect x="278" y="210" width="404" height="76" rx="12" ry="12" fill="#d7efe6" stroke="#2f9e7d" stroke-width="1.6"/>
+  <text x="480" y="241" text-anchor="middle" fill="#2f9e7d" font-size="16" font-weight="700">问题相关上下文</text>
+  <text x="480" y="264" text-anchor="middle" fill="#33322e" font-size="13">背景知识 · RAG 检索结果</text>
+  <rect x="278" y="298" width="404" height="76" rx="12" ry="12" fill="#e6e0f4" stroke="#6f61c7" stroke-width="1.6"/>
+  <text x="480" y="329" text-anchor="middle" fill="#6f61c7" font-size="16" font-weight="700">用户记忆</text>
+  <text x="480" y="352" text-anchor="middle" fill="#33322e" font-size="13">跨会话检索出的相关记忆</text>
+  <rect x="278" y="386" width="404" height="76" rx="12" ry="12" fill="#f7ddd2" stroke="#dd6440" stroke-width="1.6"/>
+  <text x="480" y="417" text-anchor="middle" fill="#dd6440" font-size="16" font-weight="700">工具定义与输出</text>
+  <text x="480" y="440" text-anchor="middle" fill="#33322e" font-size="13">工具 / MCP · 调用外部能力</text>
+  <rect x="278" y="474" width="404" height="76" rx="12" ry="12" fill="#e9e6df" stroke="#6f6a61" stroke-width="1.6"/>
+  <text x="480" y="505" text-anchor="middle" fill="#6f6a61" font-size="16" font-weight="700">会话历史记录</text>
+  <text x="480" y="528" text-anchor="middle" fill="#33322e" font-size="13">过长时压缩、总结部分</text>
+  <rect x="278" y="562" width="404" height="76" rx="12" ry="12" fill="#f2e7cd" stroke="#c79433" stroke-width="1.6"/>
+  <text x="480" y="593" text-anchor="middle" fill="#c79433" font-size="16" font-weight="700">结构化输出</text>
+  <text x="480" y="616" text-anchor="middle" fill="#33322e" font-size="13">约束大模型输出的格式</text>
+  <rect x="278" y="650" width="404" height="76" rx="12" ry="12" fill="#dbe7f6" stroke="#3f74c9" stroke-width="1.6"/>
+  <path d="M312,724 L312,740 L330,724 Z" fill="#dbe7f6"/>
+  <text x="480" y="681" text-anchor="middle" fill="#3f74c9" font-size="16" font-weight="700">用户输入</text>
+  <text x="480" y="704" text-anchor="middle" fill="#33322e" font-size="13">当前这一轮的请求</text>
+  <rect x="278" y="738" width="404" height="76" rx="12" ry="12" fill="#ffffff" stroke="#e3ddd0" stroke-width="1" stroke-dasharray="5,4"/>
+  <text x="480" y="769" text-anchor="middle" fill="#6f6a61" font-size="16" font-weight="700">许多……</text>
+  <text x="480" y="792" text-anchor="middle" fill="#33322e" font-size="13">更多可注入的上下文成分</text>
+  <g stroke="#8a8578" stroke-width="2" fill="none" stroke-linecap="round" transform="translate(468,864)"><circle cx="4" cy="16" r="3.5"/><circle cx="16" cy="16" r="3.5"/><line x1="6.5" y1="13.5" x2="26" y2="2"/><line x1="13.5" y1="13.5" x2="26" y2="9"/></g>
+  <text x="514" y="882" fill="#6f6a61" font-size="12">窗口有限 · 需不断裁剪 / 压缩</text>
+</svg>
