@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 630" width="1040" height="630">
+  <style>text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, 'PingFang SC', 'Microsoft YaHei', 'Microsoft JhengHei', 'SimHei', sans-serif;}</style>
+  <rect width="1040" height="630" fill="#f8f6f3"/>
+  <text x="520" y="40" text-anchor="middle" fill="#1a1a1a" font-size="24" font-weight="700">上下文工程全景架构</text>
+  <text x="520" y="64" text-anchor="middle" fill="#6f6a61" font-size="13">为 agent 每一步动态组装最优上下文 —— 全文导览</text>
+  <rect x="28" y="84" width="984" height="516" rx="18" ry="18" fill="none" stroke="#b8b2a6" stroke-width="1.6" stroke-dasharray="7,5"/>
+  <text x="48" y="108" fill="#8a8378" font-size="13" font-weight="600">Harness Engineering · 模型「能做什么」（第七章）—— 沙箱 / 工具执行 / 子 agent 编排 / 生命周期</text>
+  <rect x="52" y="124" width="936" height="456" rx="14" ry="14" fill="#fdfcfa" stroke="#8a8378" stroke-width="2"/>
+  <text x="70" y="148" fill="#1a1a1a" font-size="15" font-weight="700">上下文工程 · 模型「看到什么」</text>
+  <rect x="70" y="162" width="900" height="140" rx="12" ry="12" fill="#fbf9f5" stroke="#ddd7cb" stroke-width="1.4"/>
+  <text x="86" y="186" fill="#4a4644" font-size="14" font-weight="700">① 上下文的组成 —— 三类信号（第一章 · What）</text>
+  <rect x="86" y="198" width="278" height="92" rx="10" ry="10" fill="#a8c5e6" stroke="#4a4a4a" stroke-width="1.8"/>
+  <text x="225" y="224" text-anchor="middle" fill="#1a1a1a" font-size="15" font-weight="700">指导性上下文</text>
+  <text x="225" y="247" text-anchor="middle" fill="#33322e" font-size="12">系统提示 · 任务描述 · 输出格式约束</text>
+  <rect x="135" y="262" width="180" height="20" rx="10" ry="10" fill="#ffffff" stroke="#a9a294" stroke-width="1"/>
+  <text x="225" y="276" text-anchor="middle" fill="#6f6a61" font-size="11">▸ 提示词工程 = 其子集</text>
+  <rect x="380" y="198" width="278" height="92" rx="10" ry="10" fill="#9dd4c7" stroke="#4a4a4a" stroke-width="1.8"/>
+  <text x="519" y="224" text-anchor="middle" fill="#1a1a1a" font-size="15" font-weight="700">信息性上下文</text>
+  <text x="519" y="247" text-anchor="middle" fill="#33322e" font-size="12">用户输入 · RAG 检索 · 记忆 · 会话历史</text>
+  <rect x="459" y="262" width="120" height="20" rx="10" ry="10" fill="#ffffff" stroke="#a9a294" stroke-width="1"/>
+  <text x="519" y="276" text-anchor="middle" fill="#6f6a61" font-size="11">▸ 需要知道什么</text>
+  <rect x="674" y="198" width="278" height="92" rx="10" ry="10" fill="#f4e4c1" stroke="#4a4a4a" stroke-width="1.8"/>
+  <text x="813" y="224" text-anchor="middle" fill="#1a1a1a" font-size="15" font-weight="700">行动性上下文</text>
+  <text x="813" y="247" text-anchor="middle" fill="#33322e" font-size="12">工具定义 · 工具调用轨迹</text>
+  <rect x="711" y="262" width="204" height="20" rx="10" ry="10" fill="#ffffff" stroke="#a9a294" stroke-width="1"/>
+  <text x="813" y="276" text-anchor="middle" fill="#6f6a61" font-size="11">▸ 能做什么 · 做了得到什么</text>
+  <rect x="70" y="316" width="900" height="124" rx="12" ry="12" fill="#fbf9f5" stroke="#ddd7cb" stroke-width="1.4"/>
+  <text x="86" y="340" fill="#4a4644" font-size="14" font-weight="700">② 四大操作 —— 管理动态上下文（第三章 · How）</text>
+  <rect x="86" y="352" width="205" height="76" rx="10" ry="10" fill="#e8e6e3" stroke="#4a4a4a" stroke-width="1.8"/>
+  <text x="189" y="382" text-anchor="middle" fill="#1a1a1a" font-size="15" font-weight="700">写入 Write</text>
+  <text x="189" y="404" text-anchor="middle" fill="#33322e" font-size="11.5">存到窗口外，按需取回</text>
+  <rect x="307" y="352" width="205" height="76" rx="10" ry="10" fill="#e8e6e3" stroke="#4a4a4a" stroke-width="1.8"/>
+  <text x="410" y="382" text-anchor="middle" fill="#1a1a1a" font-size="15" font-weight="700">选取 Select</text>
+  <text x="410" y="404" text-anchor="middle" fill="#33322e" font-size="11.5">路由 · Skills · RAG 检索</text>
+  <rect x="528" y="352" width="205" height="76" rx="10" ry="10" fill="#e8e6e3" stroke="#4a4a4a" stroke-width="1.8"/>
+  <text x="631" y="382" text-anchor="middle" fill="#1a1a1a" font-size="15" font-weight="700">压缩 Compress</text>
+  <text x="631" y="404" text-anchor="middle" fill="#33322e" font-size="11.5">更少 token 承载核心</text>
+  <rect x="749" y="352" width="205" height="76" rx="10" ry="10" fill="#e8e6e3" stroke="#4a4a4a" stroke-width="1.8"/>
+  <text x="852" y="382" text-anchor="middle" fill="#1a1a1a" font-size="15" font-weight="700">隔离 Isolate</text>
+  <text x="852" y="404" text-anchor="middle" fill="#33322e" font-size="11.5">子 agent 分隔上下文</text>
+  <rect x="70" y="454" width="560" height="100" rx="12" ry="12" fill="#fbf9f5" stroke="#ddd7cb" stroke-width="1.4"/>
+  <text x="86" y="478" fill="#4a4644" font-size="14" font-weight="700">③ 底层技术栈（第五章 · 生态）</text>
+  <rect x="86" y="500" width="96" height="34" rx="8" ry="8" fill="#f4e4c1" stroke="#cbb98e" stroke-width="1.3"/>
+  <text x="134" y="522" text-anchor="middle" fill="#33322e" font-size="12">向量数据库</text>
+  <rect x="192" y="500" width="96" height="34" rx="8" ry="8" fill="#f4e4c1" stroke="#cbb98e" stroke-width="1.3"/>
+  <text x="240" y="522" text-anchor="middle" fill="#33322e" font-size="12">嵌入模型</text>
+  <rect x="298" y="500" width="96" height="34" rx="8" ry="8" fill="#f4e4c1" stroke="#cbb98e" stroke-width="1.3"/>
+  <text x="346" y="522" text-anchor="middle" fill="#33322e" font-size="12">知识图谱</text>
+  <rect x="404" y="500" width="96" height="34" rx="8" ry="8" fill="#f4e4c1" stroke="#cbb98e" stroke-width="1.3"/>
+  <text x="452" y="522" text-anchor="middle" fill="#33322e" font-size="12">RAG</text>
+  <rect x="510" y="500" width="96" height="34" rx="8" ry="8" fill="#f4e4c1" stroke="#cbb98e" stroke-width="1.3"/>
+  <text x="558" y="522" text-anchor="middle" fill="#33322e" font-size="12">持久化存储</text>
+  <rect x="646" y="454" width="324" height="100" rx="12" ry="12" fill="#e8e6e3" stroke="#8a8378" stroke-width="1.8"/>
+  <text x="662" y="478" fill="#1a1a1a" font-size="14" font-weight="700">④ 上下文管理 · 贯穿全程</text>
+  <text x="662" y="504" fill="#33322e" font-size="12.5">动态平衡 · 上下文预算规划</text>
+  <text x="662" y="528" fill="#33322e" font-size="12.5">防 Context Rot（上下文腐化）</text>
+</svg>
