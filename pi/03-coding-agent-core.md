@@ -4,6 +4,8 @@
 >
 > 所有 `文件:行号` 基于 commit `3f9aa5d1`。除特别注明外，路径相对 `packages/coding-agent/src/core/`。
 
+> **修订说明（2026-07-20）**：fork 并入上游 v0.80.10（`3da591ab`）后，第 2 章和第 10 章已按新代码**就地改写**（旧 ModelRegistry/AuthStorage 组合被 `ModelRuntime` 服务群取代），这两章行号基于 fork 当前 HEAD（`3da591ab` + 注释提交，个别行号有几行浮动）；其余章节（会话树、压缩、重试、工具层、settings/trust）不受重构影响，行号仍基于 `3f9aa5d1`。
+
 ## 目录
 
 - 第 1 章 地形图：26,700 行的服务群
@@ -15,7 +17,7 @@
 - 第 7 章 自动重试：指数退避与"历史留错、上下文除错"
 - 第 8 章 工具层：ToolDefinition、Operations 注入与文件互斥
 - 第 9 章 系统提示词：每轮重建的装配线
-- 第 10 章 ModelRegistry 与 AuthStorage：02 篇 auth/ 的"旧世界原型"
+- 第 10 章 ModelRuntime 服务群：模型目录与凭证的装配层（v0.80.10 重写）
 - 第 11 章 settings 与 project trust
 - 第 12 章 不变量、判断与坑
 
@@ -30,12 +32,13 @@
   agent-session.ts        3246  ★ 总机：生命周期、事件、压缩、重试、树导航
   session-manager.ts      1623  ★ JSONL 会话树
   settings-manager.ts     1232  双层设置合并
-  model-registry.ts       1007  models.json + 内置目录 + 密钥解析入口
+  model-runtime.ts         ~630 模型/认证中枢（v0.80.10 起，见第 10 章；
+  + model-config/provider-composer/model-registry  取代旧 model-registry.ts 1007 行）
   compaction/*            ~1410 ★ 压缩与分支摘要（coding-agent 自己的实现！）
   model-resolver.ts        704  启动时选哪个模型
-  auth-storage.ts          539  auth.json + 文件锁 OAuth 刷新
+  auth-storage.ts          ~280 auth.json 文件锁存储（v0.80.10 起仅 CredentialStore）
   tools/*                 ~3500 ★ 七个内置工具 + 包装器 + 截断/互斥
-  sdk.ts                   407  ★ 装配入口 createAgentSession
+  sdk.ts                   ~389 ★ 装配入口 createAgentSession
   agent-session-runtime.ts  433 cwd 级服务重建（/new 切目录用）
   system-prompt.ts          173 系统提示词模板
   messages.ts               195 ★ 自定义消息角色 + convertToLlm
@@ -58,41 +61,45 @@
 
 ## 第 2 章 装配现场：createAgentSession 走读（sdk.ts）
 
-sdk.ts 只有 407 行，是理解整个包的最佳入口。`createAgentSession`（sdk.ts:167-407）按依赖顺序装配：
+sdk.ts 约 389 行（v0.80.10 修订），是理解整个包的最佳入口。`createAgentSession`（sdk.ts:178+）按依赖顺序装配：
 
 ```mermaid
 flowchart TD
-    AS[AuthStorage<br/>auth.json] --> MR[ModelRegistry<br/>+ models.json]
+    MRT["await ModelRuntime.create<br/>auth.json + models.json + models-store.json<br/>:186"]
     SM2[SettingsManager<br/>全局+项目 settings.json]
     SMGR[SessionManager<br/>JSONL 会话树]
     RL[ResourceLoader<br/>extensions/skills/prompts/themes]
-    MR --> MODEL[模型/思考等级恢复<br/>:192-243]
+    MRT --> MODEL[模型/思考等级恢复<br/>:205-258]
     SMGR --> MODEL
-    MODEL --> AG["new Agent(...)<br/>:294-369"]
+    MODEL --> AG["new Agent(...)<br/>:313-397"]
     SM2 --> AG
-    AG --> SESS["new AgentSession(...)<br/>:385-399"]
+    AG --> SESS["new AgentSession(...)<br/>:399+"]
     RL --> SESS
-    MR --> SESS
+    MRT --> SESS
     SMGR --> SESS
 ```
 
+与初版相比，左上角换人了：`AuthStorage → ModelRegistry` 两级装配变成一个 `await ModelRuntime.create({ authPath, modelsPath })`（:186）。注意它是**异步**的——构造中包含一次带 15 秒超时的模型目录刷新（恢复本地缓存 + 拉取 pi.dev 远端目录，第 10 章），这是 createAgentSession 变 async 链路上的最重一环。AuthStorage 没有出现在图里但仍然在场：ModelRuntime 内部默认用它当 `CredentialStore`。
+
 几个值得停下来看的决定：
 
-### 2.1 模型恢复的优先级链（sdk.ts:192-243）
+### 2.1 模型恢复的优先级链（sdk.ts:205-258）
 
-续接会话时模型从哪来？顺序是：显式 `options.model` → 会话里记录的模型（`existingSession.model`，且必须 `hasConfiguredAuth` 才用，:196-204）→ `findInitialModel`（settings 默认 → 各 provider 默认）。任何一步失败都不 throw，而是积累 `modelFallbackMessage` 给 UI 显示——**启动路径的原则是降级不中断**。思考等级同理（:224-243），最后用第 2 篇讲过的 `clampThinkingLevel` 夹到模型能力内。
+续接会话时模型从哪来？顺序是：显式 `options.model` → 会话里记录的模型（`existingSession.model`，且必须 `modelRuntime.hasConfiguredAuth` 才用，:210-217）→ `findInitialModel`（settings 默认 → 各 provider 默认，:219-227）。任何一步失败都不 throw，而是积累 `modelFallbackMessage` 给 UI 显示——**启动路径的原则是降级不中断**。思考等级同理，最后用第 2 篇讲过的 `clampThinkingLevel` 夹到模型能力内（:258）。
 
-### 2.2 streamFn 闭包：第 2 篇的起点，本篇的接点
+### 2.2 streamFn 闭包：第 2 篇的起点，本篇的接点（v0.80.10 修订）
 
-sdk.ts:302-339 的 streamFn 在第 2 篇已经拆过：ModelRegistry 解析密钥 → settings 取超时/重试参数 → 归因 headers → 扩展的 `before_provider_headers` 钩子 → `streamSimple`。这里补一个细节：`timeout=0` 被换成 `2147483647`（:310-312）——SDK 把 0 理解为"立即超时"而不是"不超时"，用 max int32 实现"事实上的无超时"。
+sdk.ts:321-351 的 streamFn 比初版薄了一层：**不再预解析密钥**（那件事下沉进了 pi-ai，02 篇 §2.3），只做 settings 参数补全（超时/重试，:322-330）和 header 定制，然后整体交给 `modelRuntime.streamSimple`（:333）。header 定制的方式也变了——不是先算好再传，而是注入一个 `transformHeaders` **回调**（:339-349）：pi-ai 在合并完认证与请求 headers 之后回调它，coding-agent 在里面叠归因 headers、再让扩展的 `before_provider_headers` 钩子过一遍。扩展因此看到的是"已合并的最终 header"，这是旧架构给不了的语义。
+
+保留的细节：`timeout=0` 被换成 `2147483647`（:324-327）——SDK 把 0 理解为"立即超时"而不是"不超时"，用 max int32 实现"事实上的无超时"。
 
 ### 2.3 extensionRunnerRef：用可变引用解鸡生蛋
 
-Agent 构造时需要挂扩展钩子（transformContext、onPayload…），但 ExtensionRunner 要等 AgentSession 构造时才创建。解法是一个共享的可变引用 `extensionRunnerRef: { current?: ExtensionRunner }`（sdk.ts:292），所有钩子在**调用时**才读 `ref.current`（:325、341、348、360）。额外红利：`reload()` 换新 runner 时只需改 ref，不用重装钩子（agent-session.ts:416-422 的注释明说了这个设计意图）。
+Agent 构造时需要挂扩展钩子（transformContext、onPayload…），但 ExtensionRunner 要等 AgentSession 构造时才创建。解法是一个共享的可变引用 `extensionRunnerRef: { current?: ExtensionRunner }`（sdk.ts:311），所有钩子在**调用时**才读 `ref.current`（:332、353、360、372）。额外红利：`reload()` 换新 runner 时只需改 ref，不用重装钩子（agent-session.ts:416-422 的注释明说了这个设计意图）。
 
 ### 2.4 convertToLlmWithBlockImages：动态读设置的防御层
 
-sdk.ts:256-290 包装了 messages.ts 的 `convertToLlm`：若 `blockImages` 设置开启，把所有图片换成占位文本。注意它**每次调用都重新读设置**（:259 注释 "Check setting dynamically so mid-session changes take effect"）——设置中途改动立即生效，不需要重启会话。这是 core 里反复出现的模式：不缓存设置值，每次问 SettingsManager。
+sdk.ts:274+ 包装了 messages.ts 的 `convertToLlm`：若 `blockImages` 设置开启，把所有图片换成占位文本。注意它**每次调用都重新读设置**（注释 "Check setting dynamically so mid-session changes take effect"）——设置中途改动立即生效，不需要重启会话。这是 core 里反复出现的模式：不缓存设置值，每次问 SettingsManager。
 
 ---
 
@@ -239,21 +246,38 @@ edit 工具本体（edit.ts:308-362）的健壮性清单：abort 检查**不用�
 
 ---
 
-## 第 10 章 ModelRegistry 与 AuthStorage：02 篇 auth/ 的"旧世界原型"
+## 第 10 章 ModelRuntime 服务群：模型目录与凭证的装配层（v0.80.10 重写）
 
-第 2 篇 10.1 节说 pi-ai 的 auth/ 抄的是"today's AuthStorage"的模式，本章就是原型本体。
+本章初版讲的是 ModelRegistry 与 AuthStorage——02 篇 auth/ 的"旧世界原型"。v0.80.10 把预言兑现了：原型被拆解，pi-ai 的 Models 集合成为唯一主线，coding-agent 这边只剩"装配 + 组合 + 快照"三件事，收敛在 `ModelRuntime` 和它的配件文件里。本章按新代码重写；所有新文件都有中文注释，可对照走读。
 
-### 10.1 ModelRegistry：模型目录的三层合并
+### 10.1 职责拆分：一个类变五个文件
 
-`ModelRegistry`（model-registry.ts）维护最终模型列表 = 内置目录（02 篇的 models.generated.ts）⊕ models.json 的**自定义模型**（ModelDefinitionSchema，:160-180——大部分字段可选，为 Ollama/LM Studio 本地模型准备了宽松默认值）⊕ models.json 的**内置模型覆盖**（ModelOverrideSchema，:183-200，改价格/窗口/compat 而不重定义）⊕ 扩展运行时 `registerProvider` 注册的 provider（agent-session.ts:2385-2392 绑定给扩展 API，注册后还会 `_refreshCurrentModelFromRegistry` 热替换当前模型对象）。全部经 TypeBox schema 校验，错误进 `loadError` 而不是炸启动。
+| 文件 | 行数级 | 职责 |
+|---|---|---|
+| model-runtime.ts | ~630 | 中枢 `ModelRuntime`，实现 pi-ai 的 `Models` 接口 |
+| model-config.ts | ~270 | models.json 的不可变快照（读文件 → TypeBox 校验 → deepFreeze） |
+| provider-composer.ts | ~560 | 把内置/models.json/扩展三层组合成一个 pi-ai `Provider` |
+| auth-storage.ts | ~280 | auth.json 文件锁存储，降级为 `CredentialStore` 实现 |
+| model-registry.ts | ~130 | 面向扩展 API 的同步兼容外观，内部全转发 ModelRuntime |
 
-`getApiKeyAndHeaders`（:712-767，第 2 篇引用过）的解析顺序：AuthStorage 的凭据（不含 env 兜底）→ models.json 里 provider 配置的 apiKey（支持 `$ENV_VAR` 引用和命令形式，resolve-config-value.ts）→ provider/model 级 headers 合并 → `authHeader: true` 的 provider 把 key 转成 `Authorization: Bearer`。
+旧 ModelRegistry 的"三层合并"还在，但形态变了：不再是启动时算好一张模型大表，而是**每个 provider 组合成一个惰性对象**。`composeModelProvider`（provider-composer.ts:439）产出的 Provider 的 `getModels()` 是闭包，每次调用现算四层合成——内置列表 → models.json upsert（自定义模型同名替换、新名追加）→ 扩展注册整体替换 → `modelOverrides` 最后收尾（用户配置最高）。schema 定义搬进了 model-config.ts（ModelDefinitionSchema :153，宽松默认值仍为 Ollama/LM Studio 本地模型准备；ModelOverrideSchema :169），三类加载失败（读文件/JSON/schema）都不炸启动，错误进 `getError()` 冒泡为 UI 警告。
 
-### 10.2 AuthStorage：跨进程文件锁上的 OAuth 刷新
+扩展的 `registerProvider` 也还是那个 API（agent-session.ts:2698-2708 绑定，注册后 `_refreshCurrentModelFromRegistry` 热替换当前模型对象），底下换成 `ModelRuntime.registerProvider`（model-runtime.ts:570）：先独立校验本次注册（坏配置抛错、不污染已存配置），再与既有注册按"已定义字段覆盖、未定义保留"合并——与旧契约逐条对齐，这正是兼容外观类 `ModelRegistry` 能缩到 130 行的原因。
 
-auth.json 由 `FileAuthStorageBackend` 管理：0600 权限、`proper-lockfile` 跨进程锁（auth-storage.ts:60-170，同步路径用自旋重试 :81-106，异步路径带退避+陈锁超时+锁失守回调）。`getApiKey`（:473-531）的优先级链写在注释里：运行时覆盖（--api-key）→ auth.json 的 api_key（支持 env 引用）→ auth.json 的 OAuth（过期则锁内刷新）→ 环境变量兜底。
+### 10.2 ModelRuntime：装配、快照与两条刷新路径
 
-刷新逻辑（refreshOAuthTokenWithLock，:420-463）与第 2 篇 auth/resolve.ts 的 double-checked locking 完全同构：锁内重读文件、复查过期、刷新、持久化。多一层现实主义兜底：**刷新失败时 reload 文件再看一眼**（:503-516）——也许另一个 pi 实例刚刷新成功；真失败则返回 undefined 让该 provider 静默不可用，凭据保留等用户 /login。对照读这两处，能看到"原型 → 抽象"的提炼路径：AuthStorage 把锁、文件、刷新揉在一起；auth/ 把它拆成 CredentialStore（锁+存储）与 OAuthAuth（refresh/toAuth）两个正交接口。
+`ModelRuntime.create`（model-runtime.ts:140）的装配顺序：AuthStorage 包上 `RuntimeCredentials`（--api-key 的内存覆盖装饰器，read/list 时盖过底层存储、永不落盘）→ `ModelConfig.load` → `FileModelsStore`（动态目录持久化到 models-store.json，复用 auth-storage 的文件锁后端）→ 每个内置 provider 包上 `withRemoteCatalog`（pi.dev 远端目录：4 小时节流、404 视为"无远端目录"、结果落盘、离线时从本地恢复）→ 首次 `refresh`，带 15 秒 AbortController 超时兜底，`PI_OFFLINE` 时只走缓存。
+
+认证已经不归它管（在 pi-ai 的 `resolveProviderAuth` 里，02 篇 §10.1），它补的是 coding-agent 特有的两块：
+
+- **模型级配置 headers**：`getAuth`（:391+）在 pi-ai 解析结果之上叠加 models.json/扩展的 per-model headers——这些 header 可引用环境变量，必须等 env 解析完才能展开。
+- **UI 快照**：认证检查是异步的，TUI 的选择器/页脚要同步渲染。`ModelRuntimeSnapshot` 把"全部模型/可用模型/各 provider 认证状态"缓存成不可变对象整体替换。刷新分两条路径（:298/:304 的一对方法）：读路径 `refreshAvailability` 让并发读者共享同一个进行中的刷新；写路径 `forceRefreshAvailability` 强制排在旧刷新之后再刷——变更操作不能读到变更前启动的过期结果。`setRuntimeApiKey`（:415）还会先乐观更新快照再异步校正，保证 `--api-key` 场景模型立即可选。
+
+### 10.3 AuthStorage 的现状与 authHeader 语义
+
+auth.json 仍由 `FileAuthStorageBackend` 管理（auth-storage.ts:30-173：0600 权限、`proper-lockfile` 跨进程锁，同步自旋 + 异步退避双路径），但类本身只实现 pi-ai 的 `CredentialStore` 四方法（:176 起）——`modify` 在文件锁内执行读改写，OAuth 何时刷新由 pi-ai 的 `resolveStoredOAuth` 决定。初版结尾那句"原型 → 抽象的提炼路径"到此收尾：锁与存储留在了 coding-agent（它知道 auth.json 在哪），刷新编排上移进了 pi-ai（它知道 OAuth 语义）。
+
+models.json 的 `apiKey`（`$ENV_VAR` 引用和命令形式，resolve-config-value.ts）与 `authHeader` 也换了家：`composeApiKeyAuth`（provider-composer.ts）把它们编进组合后 Provider 的 `ApiKeyAuth`——`check` 无副作用（命令形式只标记不执行，供列表展示），`resolve` 才真正取值；`authHeader: true` 才注入 `Authorization: Bearer`，因为有的 provider 用自定义 header 鉴权，擅自加 Bearer 会破坏请求。
 
 ---
 
@@ -295,7 +319,7 @@ SettingsManager 维护两个文件：全局 `~/.pi/agent/settings.json` 和项�
 - **溢出恢复只试一次**（`_overflowRecoveryAttempted`）：压缩后仍溢出就放弃，报错建议换大窗口模型；不要在扩展里无脑重触发。
 - **扩展命令不能进队列**（`_throwIfExtensionCommand`，:1364-1374）：流式期间 steer 一个 `/命令` 会 throw，模式层要预检。
 - **getSessionStats ≠ getContextUsage**（6.2 节）：一个是全史账单、一个是当前分支上下文，别拿错口径。
-- **models.json 的 compat 校验是三选一 Union**（model-registry.ts:152-156）：字段拼错不会报"未知字段"而是整体匹配失败，报错信息可能指向别的 schema 分支。
+- **models.json 的 compat 校验是三选一 Union**（model-config.ts:127-131，v0.80.10 后 schema 住这里）：字段拼错不会报"未知字段"而是整体匹配失败，报错信息可能指向别的 schema 分支。
 
 ### 12.4 与下一篇的接口
 
@@ -303,4 +327,4 @@ SettingsManager 维护两个文件：全局 `~/.pi/agent/settings.json` 和项�
 
 ---
 
-*基于 commit 3f9aa5d1。AgentSession 的公开方法与 AgentSessionEvent 是三种模式和扩展系统的共同依赖，属于这个包里最稳定的 API；会话文件格式有版本迁移机制（v1→v2→v3，session-manager.ts:226-292）保证旧会话永远可读。*
+*初版基于 commit 3f9aa5d1；第 2、10 章于 2026-07-20 按 v0.80.10（`3da591ab`）修订。AgentSession 的公开方法与 AgentSessionEvent 是三种模式和扩展系统的共同依赖，属于这个包里最稳定的 API；会话文件格式有版本迁移机制（v1→v2→v3，session-manager.ts:226-292）保证旧会话永远可读。*

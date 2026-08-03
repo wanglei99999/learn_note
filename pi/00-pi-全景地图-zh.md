@@ -1,6 +1,10 @@
-# Pi 全景地图 — 架构与原理
+# Pi 全景地图 — 架构与原理（第 0 遍：浅而广）
 
 > 本文是 pi-mono 学习系列的第 0 篇。目标是建立整体地图：五个包如何分层、一次 prompt 从敲回车到渲染完成经过哪些环节、复杂度集中在哪里。**本文故意不深入任何单个子系统**——每个子系统的深挖版是后续单独的文档（见第 10 章）。
+>
+> 所有 `文件:行号` 引用基于 commit `3f9aa5d1`（2026-07 的 main 分支）。文中代码路径均相对仓库根目录。
+>
+> **⚠️ v0.80.10 更新（2026-07-20）**：上游重构了模型/认证子系统——pi-ai 新增有状态运行时（`Provider`/`Models`/`CredentialStore`），coding-agent 的 ModelRegistry/AuthStorage 组合被 `ModelRuntime` 取代。涉及本篇第 4、5 章的鉴权与模型目录描述；02 篇（§2.2/2.3、§5、§10）和 03 篇（第 2、10 章）已按新架构修订，读那两篇即可获得当前准确版本。
 
 ## 目录
 
@@ -462,6 +466,7 @@ docs/packages.md:20 的原话："Pi packages run with full system access. … Re
 
 6. **`06-testing.md` — 如何确定性地测试一个 agent**：`test/suite/harness.ts` + faux provider 如何把非确定性的 agent 循环变成可断言的确定性系统（170+ 测试文件零 API 消耗）；`test/suite/regressions/` 按 issue 编号命名的回归测试目录——读一遍等于读一遍"coding agent 在真实世界里都怎么坏的"案例集。这是全项目最值得移植到自己项目的工程实践。
 7. **`07-robustness-and-cost.md` — 健壮性与成本工程**：重试体系（`RetrySettings` 的指数退避，settings-manager.ts:27-32；`isRetryableAssistantError` 的可重试错误判定；重试如何依赖 `agentLoopContinue` 的上下文合法性约束）、上下文溢出触发自动压缩的链路（`isContextOverflow`），以及 prompt 缓存经济学（`core/cache-stats.ts` + `ai/src/api/openai-prompt-cache.ts`——Anthropic 显式缓存断点 vs OpenAI 自动前缀缓存两种机制，缓存命中与否直接决定成本数量级；commit 3f9aa5d1 刚加入缓存未命中跟踪，说明维护者自己也在盯这个数字）。
+8. **`08-session-tree-and-context.md` — 会话树与上下文管理**：从一个 JSONL 文件到 LLM 上下文的完整链路（coding-agent 的 `session-manager.ts` 走读）——流式加载与懒刷盘、内存投影、O(n) 建树、路径回溯、分支与标签、压缩边界的三层视图；基于 2026-08-02 的动手实验整理，附复习自测题。
 
 ### 10.3 上手实验建议
 
