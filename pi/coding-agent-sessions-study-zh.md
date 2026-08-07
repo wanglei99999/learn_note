@@ -6,6 +6,7 @@
 
 - `sessions.md`
 - `session-format.md`
+- `compaction.md`
 
 ## 1. sessions.md：Pi 如何保存和分叉对话
 
@@ -410,4 +411,338 @@ parentId 负责形成会话树
 当前 leaf 负责选择活动路线
 Compaction 负责缩短有效上下文
 buildSessionContext() 负责生成真正发给模型的内容
+```
+
+## 3. compaction.md：上下文压缩与分支总结
+
+LLM 的上下文窗口有限，但 Pi 的 Session 可以长期保存完整历史。Compaction 解决的是“哪些内容继续发给模型”，而不是删除 Session 文件里的旧记录。
+
+```text
+完整 Session 历史：继续保留在 JSONL 文件
+模型有效上下文：旧历史摘要 + 近期原始消息
+```
+
+因此上下文压缩是有损的上下文转换，不是历史清理。
+
+### 两种总结机制
+
+Pi 有两种容易混淆的总结：
+
+| 机制 | 触发方式 | 解决的问题 |
+|---|---|---|
+| 上下文压缩 | 自动达到阈值，或 `/compact` | 当前路线太长，需要释放上下文空间 |
+| 分支总结 | 使用 `/tree` 切换路线 | 新路线需要继承被放弃分支的重要发现 |
+
+上下文压缩处理的是“同一条活动分支上的时间跨度”，分支总结处理的是“不同路线之间的信息转移”。两者使用相同的结构化摘要格式，也都会累计跟踪读过和修改过的文件。
+
+### 自动压缩何时触发
+
+触发公式是：
+
+```text
+contextTokens > contextWindow - reserveTokens
+```
+
+其中：
+
+- `contextWindow`：当前模型的上下文窗口。
+- `contextTokens`：当前准备发送的上下文大小。
+- `reserveTokens`：为模型下一次回复预留的空间，默认 16384。
+
+假设模型窗口为 128k，预留 16k，那么有效上下文接近 112k 时就应开始压缩，而不是等到 128k 已经塞满后才处理。预留空间是为了保证模型仍有能力生成回答或工具调用。
+
+也可以手动执行：
+
+```text
+/compact
+/compact 请重点保留架构决策和未解决问题
+```
+
+后面的文字是本次摘要的关注指令，不是新的用户任务。
+
+### `reserveTokens` 与 `keepRecentTokens` 不同
+
+这两个配置解决不同问题：
+
+```text
+reserveTokens     为下一次模型输出留多少空间
+keepRecentTokens  压缩时保留多少近期原始上下文
+```
+
+`keepRecentTokens` 默认是 20000。Pi 从最新消息向前估算 Token，尽量保留这部分近期工作，把更早的内容交给模型总结。
+
+压缩后的上下文大致为：
+
+```text
+System Prompt
++
+旧历史的结构化摘要
++
+最近约 keepRecentTokens 的原始消息
+```
+
+近期消息保留原文，是因为当前代码、最新错误和正在进行的工具调用通常比早期讨论更需要精确细节。
+
+### 一次压缩的完整过程
+
+1. 从最新消息向前计算，确定要保留的近期范围。
+2. 找到 `firstKeptEntryId`，作为近期原文的起点。
+3. 收集更早、需要被摘要的消息。
+4. 如果已有旧摘要，把旧摘要也作为迭代上下文交给总结模型。
+5. 调用 LLM 生成新的结构化摘要。
+6. 向 Session 追加 `CompactionEntry`。
+7. 重新构建有效上下文，只发送摘要和保留范围内的原始消息。
+
+可以表示为：
+
+```text
+压缩前：
+[旧消息 A B C D] [近期消息 E F G]
+
+Session 文件追加 CompactionEntry 后：
+[A B C D E F G] [CompactionEntry]
+     ↑ 完整历史仍在文件中
+
+模型实际看到：
+[A B C D 的摘要] [E F G 原文]
+```
+
+### CompactionEntry 保存什么
+
+核心字段是：
+
+```typescript
+interface CompactionEntry<T = unknown> {
+  type: "compaction";
+  id: string;
+  parentId: string;
+  summary: string;
+  firstKeptEntryId: string;
+  tokensBefore: number;
+  fromHook?: boolean;
+  details?: T;
+}
+```
+
+- `summary`：旧上下文的摘要。
+- `firstKeptEntryId`：从哪个条目开始继续保留原文。
+- `tokensBefore`：这次压缩前重建出的实际上下文 Token 数。
+- `fromHook`：摘要是否由 Extension 提供。
+- `details`：默认用于文件跟踪，Extension 也可以保存自定义数据。
+
+默认 `details` 为：
+
+```typescript
+{
+  readFiles: string[];
+  modifiedFiles: string[];
+}
+```
+
+### 为什么再次压缩时不能只总结“上次压缩之后”的内容
+
+第一次压缩后，仍保留了一段近期原文。随着对话继续，这些曾经的“近期内容”最终也会变旧，需要进入下一轮摘要。
+
+因此第二次压缩通常从上一次的 `firstKeptEntryId` 开始计算，而不是简单从上一个 `CompactionEntry` 之后开始：
+
+```text
+第一次：摘要(A-D) + 原文(E-G)
+继续对话：摘要(A-D) + 原文(E-G) + H-I
+第二次：摘要(A-G) + 原文(H-I)
+```
+
+如果在当前路径中已经找不到上次的 `firstKeptEntryId`，Pi 才回退到上一个压缩条目之后继续处理。这种迭代压缩使摘要能够继承更早结论，同时逐步吸收曾经保留的消息。
+
+### Turn 与切割点
+
+一个 Turn 从用户消息开始，包含下一条用户消息之前的 Assistant 回复和工具调用：
+
+```text
+User
+├─ Assistant toolCall
+├─ ToolResult
+├─ Assistant toolCall
+├─ ToolResult
+└─ Assistant final response
+```
+
+正常情况下，Pi 在 Turn 边界切割，避免把一个尚未完成的工作过程拆开。
+
+合法切割点可以是：
+
+- 用户消息
+- Assistant 消息
+- BashExecution 消息
+- `custom_message`
+- `branch_summary`
+
+不能从 `ToolResult` 开始保留，因为工具结果必须和前面的工具调用保持配对。否则模型会看到一个没有来源的工具结果，消息协议可能无效，也无法理解它为什么出现。
+
+### Split Turn：单个 Turn 本身就太大
+
+有时一条用户指令会引发大量读文件、Bash 输出和工具调用，单个 Turn 已经超过 `keepRecentTokens`。此时无法找到合适的完整 Turn 边界，只能在 Turn 内部选择某条 Assistant 消息作为切割点。
+
+Pi 会把这一情况标记为 `isSplitTurn`，并区分：
+
+```text
+历史上下文：这个巨大 Turn 之前的内容
+Turn 前缀：巨大 Turn 中切割点之前的用户、Assistant 和工具内容
+保留内容：切割点之后的 Assistant 和工具内容
+```
+
+总结时会分别形成历史摘要和 Turn 前缀摘要，再合并为最终摘要。这样即使一次工具密集型任务本身就超过预算，也能保留它开始时的任务目标和前半段执行结果。
+
+### 分支总结解决什么问题
+
+假设会话树为：
+
+```text
+          B ─ C ─ D    ← 即将离开的旧路线
+        /
+A ─────┤
+        \
+          E ─ F        ← 准备进入的新路线
+```
+
+Pi 会：
+
+1. 找到新旧路线的最深共同祖先 A。
+2. 收集旧路线中共同祖先之后的 B、C、D。
+3. 在预算内优先保留较新的内容。
+4. 调用 LLM 生成结构化摘要。
+5. 创建 `BranchSummaryEntry`，让新路线可以继承旧路线的重要发现。
+
+BranchSummaryEntry 主要记录：
+
+```typescript
+interface BranchSummaryEntry<T = unknown> {
+  type: "branch_summary";
+  id: string;
+  parentId: string;
+  summary: string;
+  fromId: string;
+  fromHook?: boolean;
+  details?: T;
+}
+```
+
+`fromId` 表示导航前所在的旧叶节点。摘要不是把旧分支全部复制到新分支，而是用较少 Token 携带旧路线中的结论、进度和文件状态。
+
+### 文件跟踪为什么要累积
+
+摘要不仅记录自然语言结论，还会从工具调用中提取：
+
+```text
+读过哪些文件
+修改过哪些文件
+```
+
+下一次压缩或嵌套分支总结时，Pi 会同时读取旧摘要 `details` 中已有的文件记录。因此，即使早期工具调用已经不在当前模型上下文中，后续摘要仍能知道哪些文件曾被读取或修改。
+
+这有助于续接编码任务，但它只是路径记录，不代表 Pi 会自动恢复文件旧内容，也不能代替 Git。
+
+### 结构化摘要格式
+
+上下文压缩和分支总结都要求模型按固定结构输出：
+
+```markdown
+## Goal
+
+## Constraints & Preferences
+
+## Progress
+### Done
+### In Progress
+### Blocked
+
+## Key Decisions
+
+## Next Steps
+
+## Critical Context
+
+<read-files>
+...</read-files>
+
+<modified-files>
+...</modified-files>
+```
+
+它不是为了排版美观，而是为了让下一次模型调用快速恢复任务状态：目标、约束、完成项、当前工作、阻塞、关键决策和下一步都有固定位置。
+
+### 为什么总结前要序列化消息
+
+Pi 不把原始聊天消息直接当作新对话继续发送，而是先转成带角色标签的文本：
+
+```text
+[User]: ...
+[Assistant thinking]: ...
+[Assistant]: ...
+[Assistant tool calls]: read(...); edit(...)
+[Tool result]: ...
+```
+
+这明确告诉总结模型：这些内容是需要被分析的历史记录，不是要求它继续扮演原对话中的下一位 Assistant。
+
+工具结果在序列化时最多保留 2000 个字符，超出部分用截断标记代替。工具输出往往是上下文最大的来源；摘要需要保留结论和关键错误，而不是重新携带整份构建日志或完整文件内容。
+
+### Extension 如何接管总结
+
+`session_before_compact` 在自动压缩或 `/compact` 前触发。Extension 可以：
+
+- 查看待总结消息、Turn 前缀、旧摘要、文件操作和 Token 数。
+- 知道触发原因是 `manual`、`threshold` 还是 `overflow`。
+- 取消本次压缩。
+- 使用其他模型生成摘要。
+- 返回自定义 `details`。
+
+触发原因中的 `overflow` 表示模型请求已经因上下文溢出失败。Pi 可以先压缩，再重试被中止的 Turn；事件中的 `willRetry` 会说明是否准备这样做。
+
+`session_before_tree` 在 `/tree` 导航前触发，无论用户是否要求摘要都会执行。Extension 可以取消导航，或者在用户选择生成摘要时提供自定义分支摘要。
+
+Extension 自定义的是总结策略，不改变 Session 树、`firstKeptEntryId` 和有效上下文这些基本机制。
+
+### 配置
+
+```json
+{
+  "compaction": {
+    "enabled": true,
+    "reserveTokens": 16384,
+    "keepRecentTokens": 20000
+  }
+}
+```
+
+配置可以放在用户级或项目级 `settings.json` 中。
+
+| 设置 | 默认值 | 作用 |
+|---|---:|---|
+| `enabled` | `true` | 是否启用自动压缩 |
+| `reserveTokens` | `16384` | 为下一次模型输出预留空间 |
+| `keepRecentTokens` | `20000` | 压缩后保留的近期原始上下文 |
+
+关闭 `enabled` 只会禁止自动压缩，仍然可以执行 `/compact` 手动压缩。
+
+### 压缩的局限
+
+摘要是有损的。模型可能漏掉某个早期错误、精确参数或讨论过但未采用的方案。提高摘要质量不能使其等同于完整原文。
+
+Pi 的设计是同时保留两层：
+
+```text
+JSONL Session：完整、可回看、可重新分支
+LLM Context：压缩后的当前工作记忆
+```
+
+发现摘要遗漏时，可以通过 `/tree` 回看原始历史，或者从旧节点重新分支；但当前模型不会自动看到已被压缩掉的全部细节。
+
+这一篇可以归结为：
+
+```text
+Compaction 纵向压缩一条过长路线
+Branch Summary 横向搬运另一条路线的重要信息
+Session 文件保存完整历史
+模型只看到摘要加近期原文
+Extension 可以替换总结方式，但不能消除摘要的有损性
 ```
