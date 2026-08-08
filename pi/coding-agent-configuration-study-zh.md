@@ -5,6 +5,8 @@
 目前读过：
 
 - `settings.md`
+- `models.md`
+- `custom-provider.md`
 
 ## 1. settings.md：Pi 如何组织配置
 
@@ -434,3 +436,281 @@ Package 字符串形式加载包中全部资源：
 ```
 
 遇到具体需求时，再回到文档查询准确键名和默认值即可。
+
+## 2. models.md：Pi 如何接入自定义模型服务
+
+`models.json` 用于告诉 Pi 如何连接自定义模型服务。它不是模型文件，也不负责运行模型。
+
+```text
+Pi
+ ↓ 根据 models.json 组织请求
+Ollama、LM Studio、vLLM、代理或模型网关
+ ↓
+实际模型
+```
+
+文件位于 `~/.pi/agent/models.json`。每次打开 `/model` 时，Pi 都会重新读取它。
+
+### Provider 与 Model
+
+```text
+Provider：怎样连接服务
+Model：连接后调用哪个模型，以及模型具有什么能力
+```
+
+Provider 层主要配置服务地址、API 协议、认证、自定义请求头和模型列表。API 名称表示通信格式，不表示实际服务商。例如，Ollama 可以使用 `openai-completions`，因为它提供了兼容 OpenAI Chat Completions 的接口。
+
+Model 层主要配置：
+
+- `id`：发送给服务端的模型 ID，也是唯一必填字段。
+- `reasoning`：是否支持思考。
+- `input`：支持文本，还是文本和图片。
+- `contextWindow`：上下文窗口大小。
+- `maxTokens`：最大输出 Token 数。
+- `cost`：Token 价格。
+- `thinkingLevelMap`：Pi 的思考等级怎样映射到服务端。
+- `compat`：怎样适配不完全兼容的 API。
+
+最小示例：
+
+```json
+{
+  "providers": {
+    "ollama": {
+      "baseUrl": "http://localhost:11434/v1",
+      "api": "openai-completions",
+      "apiKey": "ollama",
+      "models": [
+        { "id": "qwen2.5-coder:7b" }
+      ]
+    }
+  }
+}
+```
+
+这段配置只说明 Pi 应该怎样调用 Ollama。Ollama 等模型服务必须已经启动；仅有 GGUF 文件和 `models.json`，Pi 不能直接运行模型。
+
+### API Key 的来源
+
+`apiKey` 可以保存真正的密码，也可以描述到哪里获取密码：
+
+```text
+字面量     → 这个字符串就是密码
+$变量名    → 从环境变量获取密码
+!命令      → 执行命令，用标准输出作为密码
+```
+
+```json
+"apiKey": "sk-..."
+"apiKey": "$OPENAI_API_KEY"
+"apiKey": "!op read 'op://vault/item/credential'"
+```
+
+以 `!` 开头的配置会执行本地命令，不能直接信任别人提供的 `models.json`。`/model` 只检查是否配置了认证来源；真正发送请求时才会读取环境变量或执行命令。
+
+### 修改内置配置
+
+Pi 已经内置了许多 Provider 和模型。`models.json` 可以局部修改它们：
+
+```text
+Provider 字段   → 修改连接地址、请求头等连接方式
+modelOverrides → 修改已有模型
+models         → 添加自定义模型
+```
+
+`modelOverrides` 遇到未知模型 ID 时会忽略，不会创建新模型。
+
+### compat：适配不完全兼容的 API
+
+许多服务声称兼容 OpenAI 或 Anthropic API，但只实现了其中一部分格式。例如，本地服务不支持 `developer` 角色：
+
+```json
+{
+  "compat": {
+    "supportsDeveloperRole": false
+  }
+}
+```
+
+Pi 会改用该服务能够识别的 `system` 角色。`compat` 还可以处理 Thinking 参数、Token 字段、工具结果和缓存字段等格式差异。
+
+Provider 级 `compat` 对全部模型生效；模型级 `compat` 只覆盖指定模型。具体字段不需要背诵，遇到兼容错误时再查文档。
+
+本篇可以归结为：
+
+```text
+models.json
+├─ Provider：连接哪个服务、使用什么协议
+├─ Model：调用哪个模型、模型具有什么能力
+├─ Authentication：怎样取得 API Key
+├─ Overrides：怎样修改 Pi 的内置配置
+└─ compat：怎样适配不完全兼容的 API
+```
+
+最重要的是：
+
+> `models.json` 是 Pi 的模型服务适配配置，不是模型运行器，也不是模型文件。
+
+## 3. custom-provider.md：用 Extension 注册模型服务
+
+`models.json` 适合描述 Pi 已经支持的通信方式。需要动态行为或新的通信协议时，应通过 Extension 调用 `pi.registerProvider()`。
+
+```text
+协议兼容，只需修改地址和模型
+→ models.json
+
+需要动态模型、OAuth 或自定义 Streaming
+→ Extension + registerProvider()
+```
+
+### 覆盖已有 Provider
+
+只提供 `baseUrl` 或 `headers` 时，Pi 会保留原有模型和通信逻辑：
+
+```typescript
+pi.registerProvider("anthropic", {
+  baseUrl: "https://proxy.example.com"
+});
+```
+
+这相当于把内置 Anthropic 请求转发到新的代理地址。
+
+### 注册新的 Provider
+
+提供完整的模型列表可以注册新的 Provider：
+
+```typescript
+pi.registerProvider("my-llm", {
+  baseUrl: "https://api.my-llm.com/v1",
+  apiKey: "$MY_LLM_API_KEY",
+  api: "openai-completions",
+  models: [
+    {
+      id: "my-model",
+      name: "My Model",
+      reasoning: false,
+      input: ["text"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 128000,
+      maxTokens: 4096
+    }
+  ]
+});
+```
+
+需要注意：
+
+```text
+不提供 models → 修改已有 Provider
+提供 models   → 用这份列表替换该 Provider 的模型
+```
+
+如果模型列表来自远程服务，应使用异步 Extension 工厂，在 Pi 启动完成前获取并注册模型。不要等到 `session_start`，否则 `/model` 和 `pi --list-models` 的启动阶段发现会太晚。
+
+### OAuth 是认证生命周期
+
+API Key 只是一个值，OAuth 则包含完整生命周期：
+
+```text
+login()        → 用户第一次登录
+refreshToken() → Access Token 过期后刷新
+getApiKey()    → 为当前请求取得 Access Token
+```
+
+注册 OAuth 后，用户可以通过 `/login <provider>` 登录，凭据保存在 `~/.pi/agent/auth.json`。
+
+Extension 通过回调请求 Pi 打开认证网址、显示设备码、获取用户输入或显示选择器，因此 Provider 不需要依赖具体的终端 UI。
+
+对于只需要标准 Bearer Token 的服务，可以使用 `authHeader: true`，让 Pi 添加：
+
+```http
+Authorization: Bearer <apiKey>
+```
+
+### 自定义 Streaming
+
+服务兼容现有 API 时，直接选择对应的 `api` 类型。只有协议完全不同时，才需要实现 `streamSimple`。
+
+```text
+自定义服务的响应
+        ↓
+streamSimple 解析和转换
+        ↓
+Pi 统一的 Assistant 消息事件
+```
+
+基本事件顺序是：
+
+```text
+start
+  ↓
+text / thinking / toolCall
+  ↓
+done 或 error
+```
+
+文字、Thinking 和工具调用都会以 start、delta、end 的形式逐步产生。实现需要累积内容，并同时维护当前完整的 `AssistantMessage`。
+
+自定义 Streaming 还必须处理：
+
+- 用户中止请求。
+- 服务端错误。
+- 工具调用的分段 JSON。
+- Token 用量和缓存用量。
+- 费用计算。
+
+因此应优先复用已有 API 和 `compat`，只有真正的非标准协议才自己实现 Streaming。
+
+### 上下文溢出错误
+
+Pi 识别到上下文溢出后，才能执行：
+
+```text
+移除失败的 Assistant 消息
+→ 压缩上下文
+→ 重试请求
+```
+
+如果 Provider 返回的错误文本无法被 Pi 识别，Extension 可以在 `message_end` 中把它规范化为：
+
+```text
+context_length_exceeded: 原始错误
+```
+
+规范化必须同时满足：
+
+- 只处理当前自定义 Provider。
+- 只匹配该 Provider 特有的溢出错误。
+- 已经包含标准标记时不重复修改。
+- 不能把限流或节流错误误判成上下文溢出。
+
+### 注销和测试
+
+`pi.unregisterProvider(name)` 会移除动态模型、认证配置和自定义 Streaming 处理器，并恢复此前被覆盖的内置 Provider 行为。
+
+自定义 Provider 至少应测试：
+
+- 文本和工具调用的 Streaming。
+- AbortSignal 中止处理。
+- Token 用量与费用。
+- 空响应和 Unicode 边界。
+- 上下文溢出。
+- 图片输入与工具结果。
+- 跨 Provider 的上下文交接。
+
+本篇可以归结为：
+
+```text
+registerProvider()
+├─ 覆盖已有 Provider
+├─ 注册新 Provider 和动态模型
+├─ 实现 OAuth 登录与刷新
+└─ 接入非标准 Streaming API
+
+unregisterProvider()
+└─ 移除动态行为并恢复内置配置
+```
+
+最重要的是：
+
+> 静态差异用 `models.json`，动态行为和新协议用 Extension。
