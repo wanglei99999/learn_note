@@ -9,7 +9,7 @@
 - `themes.md`
 - `keybindings.md`
 - `packages.md`
-- `extensions.md`（进行中：已读片 1 骨架 + 片 2 事件系统，剩 ctx / API 方法 / 自定义工具与 UI）
+- `extensions.md`（全书读完：片 1 骨架 / 片 2 事件 / 片 3 ctx / 片 4 API / 片 5 工具与 UI）
 
 ## 1. skills.md：给模型发"说明书"
 
@@ -403,6 +403,107 @@ pi.on("input", async (event) => {
 ```
 
 **全系统一句话**：pi 走到某步停下来问你，你的回答永远三选一——**"你继续" / "改成这样再继续" / "别继续了"**。
+
+### 片 3：ctx 武器库（927-1323 行）
+
+**两个版本**：`ExtensionContext`（人人有）；`ExtensionCommandContext`（命令处理器专属 = 基础版 + session 控制）。session 控制只给命令的原因：事件处理器运行在机器运转中途，中途拆机器会**死锁**。
+
+**基础版四组：**
+
+| 组 | 内容 | 要点 |
+| --- | --- | --- |
+| 环境探测 | `mode` / `hasUI` / `cwd` / `isProjectTrusted()` | 扩展在四种模式都会跑；弹窗前必查 `hasUI`；路径用 `CONFIG_DIR_NAME` 不硬编码 `.pi` |
+| 读状态 | `sessionManager`（只读）/ `model` / `getContextUsage()` / `getSystemPrompt()` | sessionManager 即 study 08 那套 API（getLeafId / buildContextEntries）；getSystemPrompt 看不到 context 事件和 payload 层的修改 |
+| 流程控制 | `signal` / `isIdle()` / `abort()` / `shutdown()` / `compact()` | signal 仅活动 turn 有值；compact 发起不等待（回调收结果） |
+| 命令专属 | 见下表 | — |
+
+**session 控制 = 斜杠命令的编程版：**
+
+| 方法 | 等价操作 |
+| --- | --- |
+| `ctx.newSession()` | `/new` |
+| `ctx.fork(id, {position:"before"})` / `{position:"at"}` | `/fork` / `/clone` |
+| `ctx.navigateTree(id, {summarize, customInstructions, label})` | `/tree` 跳转 + Summarize 对话框 + Shift+L |
+| `ctx.switchSession(path)` | `/resume`（配 `SessionManager.list(cwd)` 发现会话） |
+| `ctx.reload()` | `/reload` |
+
+**★ withSession 陷阱**（session 替换生命周期）：`withSession` 在旧会话 shutdown、扩展重载、新实例 session_start **之后**才运行，但**跑在旧闭包里**——捕获的旧 `ctx`/`pi`/`sessionManager` 全是失效对象，用了抛异常。规矩：**回调里只用参数传入的新 ctx；跨越边界只捕获纯数据**（字符串/id/配置）。"withSession 是写给新会话的信：信里只装数据，工具用信封附的新 ctx。"
+
+**ctx.reload() 自指语义**：`await ctx.reload()` 之后的代码仍是旧版本运行；把 reload 当处理器最后一句。工具拿不到加强版 ctx → 组合技：工具里 `pi.sendUserMessage("/reload-cmd", {deliverAs:"followUp"})` 排队一条命令消息当桥。
+
+### 片 4：ExtensionAPI 方法（1324-1846 行）
+
+**registerTool 字段的读者分工**：`name`/`label` 给人，`description`/`parameters`(typebox schema) 给 LLM 决定怎么调，`execute` 给 pi 执行。执行流：LLM 按 schema 构造参数 → pi 校验 → execute(toolCallId, params, signal, onUpdate, ctx) → 返回 {content, details}。随时可注册（不限工厂函数），立即生效无需 /reload。
+
+**promptSnippet / promptGuidelines = 系统提示词里的广告位**：description 让模型"能用"，promptGuidelines 让模型"对的时机主动用"（如内置 read 的 "Use read instead of cat"）。Guidelines 平铺无署名 → 必须点名工具（"Use my_tool when..."，禁 "this tool"）。与写 skill description 是同一门手艺：**给模型写路标**。
+
+**三种写入方式（判断口诀：要模型知道吗？）**
+
+| 方法 | 进 LLM 上下文 | 用途 |
+| --- | --- | --- |
+| `sendUserMessage(text)` | ✅ 以用户身份 | 装用户说话，总触发 turn；流式中必须指定 deliverAs |
+| `sendMessage({customType})` | ✅ 自定义消息 | 注入信息给模型；配 registerMessageRenderer 画 UI |
+| `appendEntry(type, data)` | ❌ 永不 | 纯存档；配 registerEntryRenderer 画 UI |
+
+投递选项即消息队列语义：`deliverAs: "steer"`（当前 turn 工具跑完插入）/ `"followUp"`（全忙完）/ `"nextTurn"`；`triggerTurn: true` 空闲时立即触发。
+
+**★ content / details——三读者模型**：
+
+```text
+content → ① 模型(推理用,按 token 计费)
+details → ② 界面/用户(渲染器画 UI,如截断警告、待办清单) 
+        → ③ 扩展自己(状态存档,session_start 沿分支重放恢复)
+        → (+未来:审计线索,如 bash 的 fullOutputPath)
+```
+
+分界线不是大小是受众：read 全文进 content（模型此刻需要）、details 只放截断元数据；subagent 反过来（content 一句结论、8 万 token 过程零占用——上下文隔离的机制本质）。**与 skill 渐进披露、compaction 同一原则：上下文只放此刻必要的，完整数据放持久层按需取回。**
+
+**★ 状态管理官方模式**：状态存工具结果的 `details`，`session_start` 沿 `getBranch()` 重放恢复——状态跟着树节点走，**天然支持分支**（/tree 跳回三步前读到的就是那个时间点的状态），外部文件做不到。事件溯源在扩展层的应用。
+
+**signal 机制（协作式取消）**：`AbortController`(pi 持有) + `AbortSignal`(发给大家)。Esc → pi abort() → 旗子翻转+广播；**signal 不杀代码**，全靠配合：① 转交支持它的 API（fetch/spawn）② 长循环查 `signal.aborted` ③ 监听 abort 事件做清理。不配合的后果：Esc 后 pi 等你的 Promise 返回，界面假死。"pi 只能广播，收不收听是你的教养。"
+
+**其余速查**：`registerCommand`（同名不覆盖，编号 /review:1；getArgumentCompletions 补全；对应 input 流水线第 1 站）、`registerShortcut`/`registerFlag`、`pi.exec`、`get/setActiveTools`（一行造只读模式/plan 模式）、`setModel`/`setThinkingLevel`、`pi.events`（扩展间总线）、`registerProvider`（动态注册 LLM provider）。
+
+### 片 5：自定义工具与 UI（1847-2945 行）
+
+**工具进阶要点：**
+
+- **错误 = throw**，返回值永远不设错误标志；抛出被捕获 → isError:true 回报 LLM
+- `terminate: true`：本批全部终止性才生效，跳过后续 LLM 调用（structured-output 场景）
+- `prepareArguments`：schema 校验前的兼容垫片，专治**旧会话恢复**时参数形状过期；公开 schema 保持严格
+- **★ 改文件必须 `withFileMutationQueue(绝对路径, 读改写全过程)`**——工具默认并行，不排队则并发改同文件互相覆盖；realpath 规范化使符号链接共享队列
+- **★ 输出必须自己截断**：50KB/2000 行先到为准；`truncateHead`（重要在前：文件/搜索）/ `truncateTail`（重要在后：日志）；截断后完整版写临时文件、content 里告知路径（渐进披露）
+- **覆盖内置工具**：同名注册即覆盖；渲染按插槽独立继承（只改 execute 可白得内置 UI）；结果形状（含 details 类型）必须与内置一致；promptSnippet/Guidelines 不继承
+- **远程执行**：内置工具全部支持可插拔 operations（`createReadTool(cwd, {operations})`）——工具逻辑与执行地点解耦（SSH/容器）；bash 另有轻量 `spawnHook`
+- **动态工具加载**：注册全部、只激活 search_tools 加载器、执行中 `setActiveTools` 增量添加——**渐进披露的工具版**；变更须纯增量保缓存；惰性工具别带 promptSnippet/Guidelines（会重建系统提示词毁前缀缓存）
+
+**UI 三层力度：**
+
+```text
+① 对话框(await): select/confirm/input/editor + notify(不阻塞)
+   timeout 超时返回最保守值(undefined/false); signal 可手动关闭并区分超时 vs 用户取消
+② 装饰件(setXxx,undefined 清除): setStatus/setWidget/setFooter/setWorkingIndicator/
+   setTitle/setEditorText/addAutocompleteProvider(装饰器模式:匹配则自答,否则委托 current)/setTheme
+③ 完全接管: ctx.ui.custom((tui,theme,keybindings,done)=>组件) —— done=resolve,键盘全归你(游戏都行)
+   {overlay:true} 浮层模态(实验性); setEditorComponent 换主编辑器(继承 CustomEditor,
+   不处理的键 super.handleInput 传回,替换前 getEditorComponent 捕获前任——链条礼仪)
+```
+
+**渲染器**：registerMessageRenderer(配 sendMessage) / registerEntryRenderer(配 appendEntry)——三读者理论中"界面读者"的入口，从 details 取数画组件；样式必须走 `theme.fg("token名")`（即 themes.md 的 51 token），另有 highlightCode 语法高亮。
+
+**模式守卫表**：custom() 仅 tui；对话框 tui+rpc（查 hasUI）；json/print 全空操作。
+
+**★ 示例索引（60+ 个，最有用的资产=抄作业目录）**：入门三连 hello.ts→question.ts→todo.ts；门禁 permission-gate.ts；毕业作品 plan-mode/；子代理 subagent/；SSH/沙箱/游戏/provider 全有。
+
+### extensions.md 总纲（一句话版）
+
+```text
+片1 怎么写(工厂函数只登记) → 片2 何时被调(事件=不同位置的 on 监控,回答三选一)
+→ 片3 用什么干活(ctx 两版) → 片4 能注册什么(工具/命令/消息/状态)
+→ 片5 深度定制(工具进阶+UI 三层)
+```
+
+**学习姿势结论：这是字典不是课本——脑中留目录（能做什么、去哪抄），细节用时查文档抄示例。**
 
 
 
