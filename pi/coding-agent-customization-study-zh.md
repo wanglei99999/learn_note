@@ -9,6 +9,7 @@
 - `themes.md`
 - `keybindings.md`
 - `packages.md`
+- `extensions.md`（进行中：已读片 1 骨架 + 片 2 事件系统，剩 ctx / API 方法 / 自定义工具与 UI）
 
 ## 1. skills.md：给模型发"说明书"
 
@@ -282,7 +283,130 @@ pi -e npm:@foo/bar     # 试用：临时目录，仅本次运行有效
 - **`pi config`**：交互式开关各资源，Tab 切换全局/项目
 - **去重**：同包同时在全局与项目 → 项目优先（除非 `autoload: false` 则叠加）；身份 = npm 包名 / git URL(去 ref) / 本地绝对路径
 
-## 本册小结：贯穿五篇的三条主线
+## 6. extensions.md（片 1-2）：事件系统——"在不同的位置进行 on 监控"
+
+全文 2900 行，按功能切五片。已读：片 1 骨架（1-274 行）、片 2 事件系统（275-926 行）。
+
+### 片 1：骨架
+
+**Extension = 跑在 pi 进程里的 TS 模块**（jiti 加载，无需编译）。模板是文本、skill 是文本+脚本、extension 是代码——它和 pi 同进程同内存，所以能"改变 pi 的行为"。
+
+**核心写法：**
+
+```typescript
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
+export default function (pi: ExtensionAPI) {     // ← 工厂函数
+  pi.on("事件名", async (event, ctx) => { ... }); // 订阅事件
+  pi.registerTool({ ... });                       // 注册工具/命令/快捷键/标志
+}
+```
+
+**工厂函数**：加载时被调用**一次**、只做登记的函数；跑完就结束。真正干活的是你注册的 handler（事件发生时每次被调）。
+
+| | 工厂函数体 | handler |
+| --- | --- | --- |
+| 何时运行 | 加载时一次 | 事件发生时每次 |
+| 拿到什么 | `pi`（注册用） | `event` + `ctx`（操作用） |
+| 该干什么 | 只做注册 | 干实际的活 |
+
+**四条规矩：**
+
+1. `pi` 注册 / `ctx` 操作，别混
+2. **放进 `.pi/extensions/` 或 `~/.pi/agent/extensions/` 才能 `/reload` 热重载**；`pi -e` 只适合一次性试用（不能热重载）
+3. **工厂函数不启动后台资源**（`pi --list-models`、`pi config` 等不开 session 的命令也会调它，socket/定时器会卡住进程）——推迟到 `session_start`，配对幂等的 `session_shutdown` 清理
+4. 导入 pi 核心包（pi-ai / pi-agent-core / pi-coding-agent / pi-tui / typebox）→ peerDependencies `"*"`（呼应 packages 篇）
+
+组织形式三种：单文件 / 目录+index.ts / 带 package.json 的包。异步工厂函数会被 pi 等待（早于 session_start / resources_discover / provider 注册应用）。
+
+### 片 2：事件系统的本质
+
+> **pi 在运行的每个环节都喊一嗓子，你可以在任何一嗓子上挂个函数。** 剩下的全是查表。
+
+**四层嵌套 = 会话树同构：**
+
+```text
+session（一次 pi 运行）
+ └ agent（一次 prompt→回答完）
+    └ turn（一次 LLM 调用+工具执行，循环多次）
+       └ tool（单个工具执行）
+```
+
+**权限界定（自己总结的框架，已验证）：**
+
+- **纯时间态**（报时，无待决事项）→ 只能看：`*_start` / `*_end` / `*_update` / `*_settled` / `model_select` 等
+- **过程态**（pi 手里握着待处理的东西）→ 能改：`before_*`、`tool_call`、`tool_result`、`input`、`context`、`project_trust`
+- 同一件事常成对出现：`session_before_compact`（过程态，能改）+ `session_compact`（时间态，通知）
+- 判定方法：文档生命周期图的注解（"可阻止/可修改"）→ TS 返回类型 → 终极权威 `runner.ts` 的 emit 方法
+
+**返回值约定（源码 `core/extensions/runner.ts` 验证）：**
+
+| 你返回 | pi 反应 | 多 extension 时 |
+| --- | --- | --- |
+| `undefined` | 当你没意见 | 问下一个 |
+| `{ block: true }`（tool_call） | 不执行工具 | **短路**：一票否决，后面不问 |
+| `{ cancel: true }`（session_before_*） | 取消操作 | **短路** |
+| 补丁 `{ content... }`（tool_result） | 替换对应字段 | **中间件链**：依次累积 |
+| 任何值（通知类事件） | **无视** | 挨个通知 |
+
+源码要点：每类事件有专属 emit 方法（emitToolCall :956 / emitToolResult :900 / 通用 emit :820）；严格按加载顺序+注册顺序**串行**执行；错误隔离（单 handler 异常不拖垮别人）——**唯一例外 emitToolCall 无 try/catch**，安全策略异常必须炸出来，绝不静默放行。pi 会 `await` handler，所以能弹窗阻塞等待用户。
+
+**关键事件速查（想做 X → 挂哪个）：**
+
+| 我想…… | 事件 |
+| --- | --- |
+| 拦截/修改工具调用 | `tool_call` |
+| 修改工具结果（脱敏/截断） | `tool_result` |
+| 每轮注入信息 / 改系统提示词 | `before_agent_start` |
+| 改发给 LLM 的消息数组 | `context`（每次 LLM 调用前，深拷贝，非破坏性） |
+| 拦截/改写用户输入、自造语法 | `input` |
+| 接管 `!`/`!!` 命令执行 | `user_bash` |
+| 自定义压缩算法 | `session_before_compact` |
+| 初始化 / 清理 | `session_start` / `session_shutdown`（幂等） |
+| 尘埃落定后做事（commit/通知） | `agent_settled`（不是 agent_end！） |
+| 改 HTTP 层 | `before_provider_headers` / `before_provider_request` |
+
+**必记的坑与细节：**
+
+- **切会话（/new /resume /fork）= extension 整个重载**：`session_shutdown` → 重新加载重新绑定 → `session_start`。**闭包变量清零**！跨会话状态要存文件或 `pi.appendEntry()`
+- `agent_end` 之后还可能重试/自动压缩/跑队列消息；**真结束用 `agent_settled`**（其中 `ctx.isIdle()` 为 true）
+- `tool_call`：`event.input` **可变**，就地改参数（改后**不重新校验**）；返回值只管 block；用 `isToolCallEventType("bash", event)` 收窄类型；并行模式下**看不到兄弟工具的结果**
+- `tool_result`：部分补丁（content/details/isError/usage 各自可选）；嵌套异步要传 **`ctx.signal`**（Esc 才能取消你的 fetch）
+- `before_agent_start`：`systemPrompt` 链式传递（要 `event.systemPrompt + 追加`，别从头构造）；`systemPromptOptions` 提供 pi 构建系统提示词的全部结构化原料
+- `session_before_compact`：`preparation.firstKeptEntryId` 已算好切点（呼应 study 08），只需供 summary；reason 三值 manual/threshold/overflow
+- `tool_execution_*` 并行时序：start 按声明顺序、end 按完成顺序、最终 toolResult 消息仍按声明顺序
+- `before_provider_headers` 每请求只跑一次，**重试复用**（别放时间戳）
+
+**user_bash 三档力度**（通用模式：拦截/加工/换后端）：
+
+```text
+方式3 编结果   return { result: {output, exitCode, cancelled, truncated} }  ← 即 bashExecution 的四字段
+方式2 包一层   包装 createLocalBashOperations()，命令改完转交本地执行
+方式1 换后端   return { operations: 自己的 exec }，如 SSH 远程执行
+```
+
+**input 五站流水线：**
+
+```text
+extension命令检查 → 【input 事件】→ skill 展开 → 模板展开 → agent 开始
+```
+
+站在第 2 站，看到的是原始文本。三动作：`continue`（放行）/ `transform`（改完再过，链式）/ `handled`（到我为止，模型零感知，第一个 handled 生效）。`event.source` 区分 interactive/rpc/extension（防自己注入的消息触发自己）。
+
+自造语法例（自测通过）：
+
+```typescript
+pi.on("input", async (event) => {
+  if (event.text.startsWith("?en "))
+    return { action: "transform", text: `把下面的内容翻译成英文: ${event.text.slice(4)}` };
+});
+```
+
+**全系统一句话**：pi 走到某步停下来问你，你的回答永远三选一——**"你继续" / "改成这样再继续" / "别继续了"**。
+
+
+
+## 本册小结：贯穿前五篇的三条主线
 
 **1. 五层加载位置**（每篇都出现，已成肌肉记忆）
 
