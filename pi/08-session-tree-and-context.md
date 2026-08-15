@@ -369,11 +369,42 @@ branch(branchFromId: string): void {
 
 `firstKeptEntryId` 是压缩算法的分界线：**线后原文保留，线前只活在摘要里**。画线算法从最新往回累加估算 token，达到 `keepRecentTokens`（默认 20000，`compaction.ts:142`）后就近选一个**合法切点**：
 
-- 只能切在 user 或 assistant 消息上，**永远不切在 toolResult 上**（`:408-409`）——避免保留区开头出现没有对应调用的孤儿工具结果；切在带工具调用的 assistant 上时，其结果都在后面、一并保留；
+- 合法切点的判定在 `isCutPointMessage`（`:320-333`）：`user` / `assistant` / `bashExecution` / `custom` / `branchSummary` / `compactionSummary` 都可以，**唯独 `toolResult` 不行**——避免保留区开头出现没有对应调用的孤儿工具结果（很多 provider 的 API 直接会报错）；切在带工具调用的 assistant 上没问题，它的结果都在后面、一并保留；
 - 切点确定后会向前捎带紧邻的非上下文元数据条目（model_change 等），但不跨越可见消息或旧压缩边界（`:459-464`）；
 - 用 id 而非数组下标记录（正是 v1→v2 迁移的内容，`session-manager.ts:277-279`）：树会分叉，**下标在不同路径上没有稳定含义，id 才有**，且可在 `byId` 中 O(1) 定位。
 
 组装上下文时摘要被**提到最前**：压缩条目在树上挂在保留区之后（它是追加时的新叶子），但模型先读"前情摘要"再读近期原文——按叙事逻辑而非文件顺序。
+
+三个容易搞错的细节：
+
+**① 画线的时候，压缩条目还不存在。** `prepareCompaction` 跑在 `appendCompaction` **之前**（`agent-session.ts:2034` → `:2110`），它拿到的 `pathEntries` 只到最后一条普通消息。设当前有 0~9 十条：
+
+```text
+boundaryEnd = pathEntries.length = 10        ← 开区间上界，最大下标是 9
+findCutPoint 从 i = 9 往回走
+…算完之后 appendCompaction 才写入，新记录落到下标 10
+```
+
+**"压缩发生在下标 10"里的 10 是时刻，不是范围。** 范围是 `[0, firstKeptEntryIndex)`。
+
+**② 代码里没有"最后一条被压缩的下标"这个变量。** 只有开区间上界：
+
+```typescript
+const historyEnd = cutPoint.isSplitTurn ? cutPoint.turnStartIndex : cutPoint.firstKeptEntryIndex;
+for (let i = boundaryStart; i < historyEnd; i++) { … }   // :782
+```
+
+切点是 6 时，`i < 6` 自然停在 5——"5"是 `6 - 1` 的副产品，从没被算过。半开区间的好处：**一个数同时是"摘要的终点"和"保留区的起点"**，不可能出现缝隙或重叠（这正是第 9 篇 4.2 "拼图不是图层"的来源）。
+
+**③ 吸附切点时只往后挪，绝不往前。**
+
+```typescript
+for (let c = 0; c < cutPoints.length; c++) {
+	if (cutPoints[c] >= i) { cutIndex = cutPoints[c]; break; }   // :449-453
+}
+```
+
+`>=` 是有态度的：往后挪 = 少留原文、多压一点，最坏是损失些细节；往前挪 = 多留原文、少压一点，最坏是**压不动、机制直接失效**（见 8.3 的算例）。**宁可多压。**
 
 ### 8.2 快照语义与锯齿曲线
 
@@ -384,6 +415,53 @@ branch(branchFromId: string): void {
 ### 8.3 切在轮中间：唯一的例外
 
 "保留区内绝不压缩"有一个边角情况：若按预算画线正好落在某一轮（turn）内部——比如一轮 20 个工具调用切在第 10 个——`findCutPoint` 会记录 `turnStartIndex` / `isSplitTurn`（`:413-419`），把该轮被切掉的前半段**单独摘要**后接回保留的后半段，保证保留区开头语义完整，不从半截工具循环开始。
+
+**根因是两个判定函数不一致**（`:320-348`）：
+
+| 消息 role | 能当**切点**（`isCutPointMessage`） | 能当**轮起点**（`isTurnStartMessage`） |
+| --- | :---: | :---: |
+| `user` / `bashExecution` / `custom` / `branchSummary` / `compactionSummary` | ✅ | ✅ |
+| `assistant` | ✅ | ❌ |
+| `toolResult` | ❌ | ❌ |
+
+**`assistant` 卡在中间：可以切，但切完不是一轮的开头。** 切在那里，保留区就从半截开始：
+
+```text
+❌  assistant: "我调用 Edit 改 xxx"
+    toolResult: "ok"
+    assistant: "改完了"
+        ↑ 用户到底让它干什么，全没了——只剩手脚，没有脑袋
+```
+
+于是 `historyEnd` **退到轮起点**，范围从两段变三段：
+
+```text
+[boundaryStart, turnStartIndex)      常规历史摘要
+[turnStartIndex, firstKeptEntryIndex) 轮前缀摘要   ← 专门的 prompt
+[firstKeptEntryIndex, …)             保留原文
+```
+
+轮前缀用的是独立 prompt（`TURN_PREFIX_SUMMARIZATION_PROMPT`，`:826`），目标和常规摘要完全不同——它要的不是"讲讲以前发生了什么"，而是**把脑袋接回去**，所以第一节直接逼模型复述用户原始请求：
+
+```text
+## Original Request      ← 这轮用户要什么
+## Early Progress        ← 前半段已经干了什么（防止模型重做一遍）
+## Context for Suffix    ← 理解保留后缀所需的信息
+```
+
+两段摘要拼成一条 `summary` 存进同一个 compaction 记录（`:914`），历史在前、本轮前缀在后，**仍是一条时间直线**。
+
+**为什么不干脆把切点挪到轮起点、整轮保留？** 因为 split turn 这条路的前提就是**这一轮大到装不下**（prompt 首句原文："This is the PREFIX of a turn that was **too large to keep**"）。算例：`keepRecentTokens = 20000`，一轮里 agent 读了 20 个文件改了 20 次，整轮 18 万 token——
+
+```text
+挪到轮起点：压缩后上下文 ≈ 180,000 tokens + 一小段摘要   ← 压了个寂寞
+           且下次 boundaryStart 变成轮起点，算出同一个切点，永远压不动
+按预算切：  压缩后上下文 ≈ [历史摘要] + [轮前缀摘要 ~500] + [保留区 20,000]
+```
+
+**预算必须说了算，否则压缩机制会在最需要它的时候失效。** 这也正是 8.1 ③"只往后挪不往前挪"的同一条理由。
+
+反过来，轮子小的时候效果自然就是"整轮保留"——3000 token 的一轮，倒着攒 token 时早把整轮攒进保留区了，切点落在轮起点或更早，`isSplitTurn` 直接是 `false`。**两种情况走同一套逻辑，不需要特判。**
 
 ## 第 9 章 `!` 命令与自定义消息类型
 
@@ -414,6 +492,9 @@ AgentMessage[] → transformContext() → convertToLlm() → Message[] → LLM
 6. **有界扫描 + 按需读深**：恢复最近会话（`-c`）只读文件头，扫描字节封顶并显式抛错；列表发现（`-r`）因需展示末尾的重命名而流式读全文，10 路并发摊平；两条路径坏文件均 best-effort 跳过。
 7. **防御性解析**：坏行跳过、孤儿当根、文件头严格校验——单点损坏不放大。
 8. **架构选对，功能免费**：恢复 = 重放；分支 = 移动指针；标签 = 追加事件；压缩 = 路径上插一个节点。每个"功能"的核心实现都在 10 行以内。
+9. **预算必须可执行，否则等于没有**：切点只往后挪不往前挪（8.1 ③）、超大单轮拆成"前缀摘要 + 保留后缀"（8.3），都是为了让 `keepRecentTokens` 在任何输入下都真能兑现。**一个在极端输入下会失效的限额，恰恰会在最需要它的时候失效。**
+10. **同一条边界，两个函数各判一半**：`isCutPointMessage`（能不能当新开头）与 `isTurnStartMessage`（是不是一轮的开头）故意不同——`assistant` 前者放行、后者不放行，这个缝隙就是 `isSplitTurn` 存在的全部理由（8.3）。**当两个判定条件只差一个 case 时，那个 case 往往就是整个边角逻辑的入口。**
+11. **存 id，用时现查下标**：`firstKeptEntryId` 存 uuid 而非数组下标（8.1）。树会分叉、路径会重算，**下标在不同路径上没有稳定含义，id 才有**——同一套理由适用于 `leafId`、`parentId`、`fromId`。
 
 ## 第 11 章 复习自测
 
