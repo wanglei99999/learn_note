@@ -6,19 +6,19 @@
 >
 > 两篇合起来是一个闭环：`磁盘 → 模型 → 磁盘`。第 9 篇的关键词是**塌缩**（丢信息、不可逆），本篇的关键词是**累积**（攒信息、可中断）。
 >
-> 所有 `文件:行号` 基于 commit `859bd29bd`。核心文件：`packages/ai/src/types.ts`（事件协议与消息类型）、`packages/agent/src/agent-loop.ts`（循环与工具执行）。
->
-> **本篇状态**：第 1–2 章已完成，第 3–7 章待写。
+> 所有 `文件:行号` 基于 commit `859bd29bd`。核心文件三个：`packages/ai/src/types.ts`（事件协议与消息类型）、`packages/ai/src/api/anthropic-messages.ts`（SSE 解析与状态机，以 Anthropic 为样本）、`packages/agent/src/agent-loop.ts`（循环与工具执行）。
 
 ## 目录
 
 - 第 1 章 全景：一轮的完整时间线
 - 第 2 章 事件协议：模型吐字的切分规则
-- 第 3 章 T1 段：SSE 解析器怎么把字节变成事件（待写）
-- 第 4 章 T2 段：`AssistantMessage` 怎么攒出来（待写）
-- 第 5 章 T3 段：工具执行（待写）
-- 第 6 章 T4–T5 段：结果入上下文与循环条件（待写）
-- 第 7 章 T6 段：落盘成条目，回到第 9 篇的起点（待写）
+- 第 3 章 T1 段：SSE 解析器怎么把字节变成事件
+- 第 4 章 T2 段：`AssistantMessage` 怎么攒出来
+- 第 5 章 T3 段：工具执行
+- 第 6 章 T4–T5 段：循环怎么转
+- 第 7 章 T6 段：落回会话树
+- 第 8 章 工程模式清单
+- 第 9 章 复习自测
 
 ---
 
@@ -311,4 +311,736 @@ export type StopReason = "pending" | "stop" | "length" | "toolUse" | "error" | "
 
 ---
 
-*基于 2026-08-16 的源码精读整理（对话式逐行走读）。与第 9 篇配对：09 讲"出去"（会话历史 → LLM 请求），本篇讲"回来"（LLM 响应 → 会话历史）。第 3–7 章待写。*
+## 第 3 章 T1 段：SSE 解析器怎么把字节变成事件
+
+### 3.1 线上流过来的是什么
+
+Anthropic 的响应体是一串**文本**，长这样：
+
+```text
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"我读"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1}
+```
+
+SSE（Server-Sent Events）的规则极简：**每行是 `字段名: 值`；空行表示一个事件结束；`:` 开头的行是注释**。解析器要干的事，就是把字节流切成行、把行攒成事件。
+
+### 3.2 三层生成器叠起来
+
+```text
+ReadableStream<Uint8Array>            原始字节
+   │ iterateSseMessages(:414)          切行、攒事件      ← 通用 SSE，不认识 Anthropic
+   ▼
+ServerSentEvent { event, data, raw }
+   │ iterateAnthropicEvents(:473)      过滤 + JSON 解析   ← Anthropic 专属
+   ▼
+RawMessageStreamEvent                 Anthropic 的事件对象
+   │ stream(:514)                      翻译成中立事件      ← 变成 12 种之一（第 4 章）
+   ▼
+AssistantMessageEvent
+```
+
+每层只干一件事，且都是 `async function*`（异步生成器）——**上游一有数据下游就能拿到，不必等全部收完**。
+
+### 3.3 核心工程点：一个事件可能被切成两半
+
+网络不保证按行送达。某次 `read()` 拿到的可能是：
+
+```text
+event: content_block_delta\ndata: {"text":"我
+```
+
+后半截 `读"}` 在下一个 chunk 里。所以有 `buffer`（`:421`）：
+
+```typescript
+let buffer = "";
+while (true) {
+	const { value, done } = await reader.read();
+	if (done) break;
+
+	buffer += decoder.decode(value, { stream: true });   // 追加：新来的接在零头后面
+	let consumed = consumeLine(buffer);
+	while (consumed) {                                    // 切得动就一直切
+		buffer = consumed.rest;                           // 切剩的放回桶里
+		const event = decodeSseLine(consumed.line, state);
+		if (event) yield event;                           // 只有空行那次会进这里
+		consumed = consumeLine(buffer);
+	}
+}
+```
+
+三个角色分工明确：
+
+| 角色 | 职责 |
+| --- | --- |
+| `reader` | 水龙头：每次给一坨字节 |
+| `decoder` | 翻译官：字节 → 字符串 |
+| `buffer` | 水桶：接住还不够一行的零头 |
+
+**外层循环管"收"，内层循环管"切"**：收一坨，能切几行切几行，切不动了回去再收一坨。
+
+`consumeLine` 一次只切一行——找到**第一个**换行符，切一刀返回 `{ line, rest }`；没有换行符就返回 `null`，这正是内层循环的退出条件。
+
+用真实数据走一遍。设服务器要发的事件被切成两坨：
+
+**第一坨** `'event: content_block_delta\ndata: {"text":"我'`（JSON 从中间断了）
+
+| 轮次 | `consumeLine(buffer)` | 动作 |
+| --- | --- | --- |
+| 1 | `{ line: "event: content_block_delta", rest: 'data: {"text":"我' }` | `decodeSseLine` 记下 `state.event`，返回 `null` |
+| 2 | `null`（余下部分无换行符） | **内层循环结束** |
+
+此刻 `buffer = 'data: {"text":"我'`，半截 JSON 留在桶里，**一个事件都没 yield**。
+
+**第二坨** `'读"}\n\n'` 到达，拼接后 `buffer = 'data: {"text":"我读"}\n\n'`：
+
+| 轮次 | `consumeLine(buffer)` | 动作 |
+| --- | --- | --- |
+| 1 | `{ line: 'data: {"text":"我读"}', rest: "\n" }` | 塞进 `state.data`，返回 `null` |
+| 2 | `{ line: "", rest: "" }` | **空行！** 触发 `flushSseEvent` → **`yield event`** |
+| 3 | `null` | 内层循环结束 |
+
+**`buffer` 的作用只有一个：跨越两次 `read()` 把断掉的行接起来。** 没有它，第一坨结尾那半截 JSON 就会被当成完整一行去解析，直接炸。
+
+`decoder.decode(value, { stream: true })` 的 `stream: true` 是同一道理的**字符级**版本：一个中文字 UTF-8 占 3 字节，chunk 边界可能切在中间。加了这个标记，`TextDecoder` 会把半个字符留着等下一块；不加则解出 `�`，且再也补不回来。**`buffer` 管半行，`stream: true` 管半个字，两层保险。**
+
+### 3.4 `decodeSseLine`：攒事件的状态机
+
+分工要分清：**`consumeLine` 把字符流切成行（语法层，只认换行符），`decodeSseLine` 把行攒成事件（语义层，认识 SSE 协议）**。
+
+它一次只吃一行，反应视行的内容而定：
+
+| 输入行 | 动作 | 返回 |
+| --- | --- | --- |
+| `event: content_block_delta` | `state.event = "content_block_delta"` | `null` |
+| `data: {"text":"我读"}` | `state.data.push(...)` | `null` |
+| `data: 第二行` | 再 push 一个（**一个事件可以有多行 data**） | `null` |
+| `: keep-alive` | 忽略（注释行） | `null` |
+| `""`（空行） | **打包 `state` 成事件并清空** | **事件对象** |
+
+```typescript
+function decodeSseLine(line: string, state: SseDecoderState): ServerSentEvent | null {
+	if (line === "") {
+		return flushSseEvent(state);      // 空行：把攒的东西打包吐出去
+	}
+
+	state.raw.push(line);
+	if (line.startsWith(":")) return null;
+
+	const delimiterIndex = line.indexOf(":");
+	const fieldName = delimiterIndex === -1 ? line : line.slice(0, delimiterIndex);
+	let value = delimiterIndex === -1 ? "" : line.slice(delimiterIndex + 1);
+	if (value.startsWith(" ")) value = value.slice(1);   // 冒号后的一个空格是分隔符，不是内容
+
+	if (fieldName === "event") state.event = value;
+	else if (fieldName === "data") state.data.push(value);
+
+	return null;                          // 非空行一律返回 null，只攒不吐
+}
+```
+
+**函数本身无记忆，记忆全在 `state` 里**——它在循环外创建、反复传入。解析开头那个事件实际调了三次：
+
+```text
+第 1 次  decodeSseLine("event: content_block_delta", state)  →  null    记进 state
+第 2 次  decodeSseLine('data: {"text":"我读"}',      state)  →  null    记进 state
+第 3 次  decodeSseLine("",                           state)  →  事件!   凑齐，打包
+```
+
+这样写的好处是**函数小到一眼能验**：给一行、给一个 state，检查 state 变成什么样即可，不必构造整条流。复杂度全交给外面那个 while。
+
+于是整条链路上有两处"攒不够就先存着"，只是粒度不同：
+
+```text
+字节  ──decoder──►  字符  ──consumeLine──►  行  ──decodeSseLine──►  事件
+                            ↑ buffer 兜半行         ↑ state 兜半个事件
+```
+
+### 3.5 边界与健壮性
+
+**三种换行都要认**（`:385-412`）。`nextLineBreakIndex` 同时找 `\r` 和 `\n` 取较小者，`consumeLine` 里再补一句让 CRLF 算一个：
+
+```typescript
+if (text[lineBreakIndex] === "\r" && text[nextIndex] === "\n") nextIndex += 1;
+```
+
+`\n`、`\r\n`、`\r` 规范都允许，那就都得认。
+
+**收尾四连**（`:446-467`）。流 `done` 之后还有四步：冲掉 decoder 里残留的半个字符（`decoder.decode()` 无参调用）、处理 buffer 里剩下的完整行、把最后没有换行符的残余也当一行、最后 `flushSseEvent` 手动收尾。**服务器不保证最后给一个规规矩矩的空行**，这四步是在兜"流断在任何位置"的底。
+
+**保留原始行只为报错**。`ServerSentEvent` 有个 `raw: string[]` 字段平时没用，只在解析失败时派上用场（`:504`）：
+
+```typescript
+throw new Error(
+	`Could not parse Anthropic SSE event ${sse.event}: ${message}; data=${sse.data}; raw=${sse.raw.join("\\n")}`,
+);
+```
+
+**报错时把原始报文一起给出来**——调试流式协议时这个太重要，否则只知道"JSON 解析失败"，不知道服务器究竟发了什么。
+
+**检测被截断的流**（`:481-511`）：
+
+```typescript
+let sawMessageStart = false;
+let sawMessageEnd = false;
+// …
+if (sawMessageStart && !sawMessageEnd) {
+	throw new Error("Anthropic stream ended before message_stop");
+}
+```
+
+连接中途断掉（网络抖动、服务端崩），**HTTP 层面看起来是"正常结束"**——`reader.read()` 返回 `done: true`，不报错。只有靠协议层的配对检查才能发现"开始了但没结束"。不检查的话，上层会拿到一条内容不全的消息，还以为是完整的。
+
+**白名单挡住未知事件**（`:334`、`:489`）：
+
+```typescript
+const ANTHROPIC_MESSAGE_EVENTS: ReadonlySet<string> = new Set([
+	"message_start", "message_delta", "message_stop",
+	"content_block_start", "content_block_delta", "content_block_stop",
+]);
+// …
+if (!ANTHROPIC_MESSAGE_EVENTS.has(sse.event ?? "")) continue;
+```
+
+Anthropic 还会发 `ping` 保活事件，将来也可能新增类型。**白名单让新增事件不会把老客户端搞崩。**（`event: error` 例外，在白名单检查之前就直接 `throw`，`:485`。）
+
+---
+
+## 第 4 章 T2 段：`AssistantMessage` 怎么攒出来
+
+`stream()` 函数里那台状态机**同时干两件事**：
+
+```text
+Anthropic 的 6 种事件  ──►  ① 翻译成中立的 12 种事件（push 给下游）
+                       └──►  ② 往 output 这个对象上攒（拼出完整消息）
+```
+
+`output` 从一个空壳开始（`:522`），流结束时它就是完整的 `AssistantMessage`：
+
+```typescript
+const output: AssistantMessage = {
+	role: "assistant",
+	content: [],                    // ← 空的，边收边填
+	api: model.api,
+	provider: model.provider,
+	model: model.id,
+	usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { … } },
+};
+```
+
+### 4.1 `partial` 不是拷贝
+
+```typescript
+stream.push({ type: "text_delta", contentIndex: index, delta: …, partial: output });
+//                                                              ↑ 每次都是同一个对象
+```
+
+**每个事件带的 `partial` 都是 `output` 本人，不是快照副本。** 下游拿到的因此永远是"此刻最新状态"——`output` 一变，之前发出去的事件里的 `partial` 也跟着变。
+
+这是有意的：TUI 只需要 `render(e.partial)`，不关心自己是不是漏了几个事件。**代价是不能把 `partial` 存起来当历史快照用**——它会变。真要留存，得等 `done` 事件里的 `message`。
+
+### 4.2 事件对应关系
+
+| Anthropic | pi | 干的事 |
+| --- | --- | --- |
+| `message_start` | —（不转发） | 记 `usage` 初值、`responseId` |
+| `content_block_start` | `text_start` / `thinking_start` / `toolcall_start` | **新建一块**，push 进 `content` |
+| `content_block_delta` | `text_delta` / `thinking_delta` / `toolcall_delta` | **往那块上追加** |
+| `content_block_stop` | `text_end` / `thinking_end` / `toolcall_end` | **收尾**，清理临时字段 |
+| `message_delta` | —（不转发） | 记 `stopReason`、最终 `usage` |
+| `message_stop` | `done` | 终结 |
+
+结构上是"消息级"和"块级"两套 start/delta/stop 嵌套：
+
+```text
+message_start
+    content_block_start / delta* / stop      ← 第 0 块
+    content_block_start / delta* / stop      ← 第 1 块
+message_delta            ← stop_reason 在这里才揭晓
+message_stop
+```
+
+新建一块（`:617`）：
+
+```typescript
+if (event.content_block.type === "text") {
+	const block: Block = { type: "text", text: "", index: event.index };
+	output.content.push(block);                    // 数组里多一格
+	stream.push({ type: "text_start", contentIndex: output.content.length - 1, partial: output });
+	//                                              ↑ 刚 push 完，长度-1 就是它的下标
+}
+```
+
+往块上追加（`:659`）：
+
+```typescript
+const index = blocks.findIndex((b) => b.index === event.index);
+const block = blocks[index];
+if (block && block.type === "text") {
+	block.text += event.delta.text;               // 就地追加
+	stream.push({ type: "text_delta", contentIndex: index, delta: event.delta.text, partial: output });
+}
+```
+
+`block.text += …` 改的就是 `output.content[index].text`，因为两者是同一个数组：
+
+```typescript
+const blocks = output.content as Block[];    // :598  只是换个类型视角，不是复制
+```
+
+### 4.3 两套 index 要对上
+
+```typescript
+const index = blocks.findIndex((b) => b.index === event.index);
+//            ↑ pi 自己数组里的位置        ↑ Anthropic 给的编号
+```
+
+为什么不直接用 `event.index`？因为那是 **Anthropic 的编号**，pi 不假设它与自己数组的下标一致。于是每个 block 上临时挂一个 `index` 字段记住"我在 Anthropic 那边是几号"，用时查一遍。**发给下游的 `contentIndex` 始终是 pi 自己数组的下标**——上层永远不必知道 provider 的编号规则。
+
+### 4.4 脚手架字段搭完就拆
+
+`Block` 这个类型很有意思（`:597`）：
+
+```typescript
+type Block = (ThinkingContent | TextContent | (ToolCall & { partialJson: string })) & { index: number };
+//            └────────── 正式字段 ──────────┘   └脚手架①┘     └脚手架②┘
+```
+
+在正式类型上**临时加两个字段**：`index`（对 Anthropic 编号）和 `partialJson`（攒工具参数的半截 JSON）。`content_block_stop` 时全部删掉（`:708`、`:728`）：
+
+```typescript
+delete (block as any).index;
+// …
+block.arguments = parseStreamingJson(block.partialJson);
+delete (block as { partialJson?: string }).partialJson;
+```
+
+源码注释交代了动机：
+
+> 原地完成工具调用并删除暂存 JSON，**保证重放数据只携带解析后的参数**。
+
+**这条消息最后要落盘进会话历史**（第 7 章）——脚手架字段留着就会写进 `.jsonl`，污染数据、白占空间。
+
+### 4.5 工具参数边流边解析
+
+```typescript
+block.partialJson += event.delta.partial_json;
+block.arguments = parseStreamingJson(block.partialJson);      // :688
+```
+
+每来一段就**重新解析一次不完整的 JSON**：
+
+```text
+partialJson = '{"pa'                →  arguments = {}
+partialJson = '{"path":"A'          →  arguments = { path: "A" }
+partialJson = '{"path":"A.md"}'     →  arguments = { path: "A.md" }
+```
+
+`parseStreamingJson` 尽量解出目前已知的部分。**这样界面上能实时显示"正在读 A…"，而不是等参数全到齐才蹦出来。**
+
+### 4.6 Anthropic 到底会返回哪些类型
+
+三层，代码里都能查到。
+
+**① SSE 事件类型**：白名单六种（见 3.5），外加单独拦截的 `error` 和一概跳过的其余（`ping` 等）。
+
+**② content block 类型**（`:617-657` 那串 if）：
+
+| Anthropic 类型 | pi 存成 |
+| --- | --- |
+| `text` | `TextContent` |
+| `thinking` | `ThinkingContent` |
+| `redacted_thinking` | `ThinkingContent` + `redacted: true` |
+| `tool_use` | `ToolCall` |
+
+**四进三出。** 注意那串 if 没有 `else`——Anthropic 若返回别的块类型（如服务端工具 `server_tool_use`），**pi 会静默丢弃**，不报错也不进 `content`。
+
+**③ delta 类型**（`:659-703`）：
+
+| delta 类型 | 追加到哪 | 转发事件？ |
+| --- | --- | --- |
+| `text_delta` | `block.text` | ✅ |
+| `thinking_delta` | `block.thinking` | ✅ |
+| `input_json_delta` | `block.partialJson` | ✅ |
+| `signature_delta` | `block.thinkingSignature` | **❌ 不转发** |
+
+`signature_delta` 只往 `output` 上攒，不通知任何人（`:696-702`）——**签名是给 API 回传用的，界面上没什么可显示，发事件出去只会让下游多一次无意义重绘。**
+
+### 4.7 `redacted_thinking`：看不见但不能扔
+
+开了扩展思考后模型的推理过程会流回来，但偶尔安全系统会判定某段推理不宜明文返回，发回来的就是一坨加密数据。`types.ts:403-407` 的注释说全了：
+
+> 为 true 时表示思考内容被安全过滤器遮蔽；不透明的加密载荷保存在 `thinkingSignature` 中，**以便后续轮次原样回传给 API，维持多轮连续性**。
+
+```typescript
+const block: Block = {
+	type: "thinking",
+	thinking: "[Reasoning redacted]",              // 给人看的占位文本
+	thinkingSignature: event.content_block.data,   // 加密载荷，原样收着
+	redacted: true,
+	index: event.index,
+};
+```
+
+**你读不了，但不能扔。** 因为模型是无状态的——下一轮要把整段历史重发一遍（第 1 章）。这块思考丢了，模型就忘了自己上轮想过什么，推理链断掉，可能重新绕弯路甚至前后矛盾。对 pi 而言它就是个不透明 blob，转手而已。
+
+为什么折进 `thinking` 而不新建类型？因为它本质就是"思考，只是看不到内容"。**照搬的话 `content` 的联合类型要从 3 种变 4 种，每个 switch、每个渲染器、`convertToLlm` 的每个分支全得加一支**——用一个 `redacted?: boolean` 字段标记划算得多。
+
+顺带：`thinkingSignature` 不是 redacted 专属，**普通思考块也带签名，同样要原样回传**。区别只是普通思考的签名是附属品，redacted 的签名**就是全部内容**。
+
+### 4.8 两个健壮性细节
+
+**usage 在 `message_start` 就记**（`:606`）。注释：*在 message_start 即记录初始用量，**确保流提前中止时仍保留输入令牌统计***。按 Esc 中断时输入 token 已经花掉，必须能算出账；等流结束才记就晚了。
+
+**`message_delta` 用"非空才覆盖"更新 usage**（`:750`）：
+
+```typescript
+if (event.usage.input_tokens != null) {
+	output.usage.input = event.usage.input_tokens;
+}
+```
+
+注释：*仅用非空字段更新统计，**避免代理在 message_delta 省略字段时覆盖 message_start 的输入令牌数***。有些第三方代理转发时会把 `input_tokens` 置空，无脑赋值会把先前记下的数字冲掉。
+
+还有一处很实在的注释（`:762`）：推理令牌位于 `output_tokens_details.thinking_tokens`，**当前 SDK 类型尚未声明该字段，因此用窄类型断言读取，字段结构已通过真实 API 验证**。官方 SDK 的类型定义落后于真实 API，pi 用窄断言绕过并注明验证来源——**将来 SDK 补上类型时，一眼能看出这段可以清理**。
+
+---
+
+## 第 5 章 T3 段：工具执行
+
+### 5.1 先决定串行还是并行
+
+```typescript
+// agent-loop.ts:449-456
+const toolCalls = assistantMessage.content.filter((c) => c.type === "toolCall");
+const hasSequentialToolCall = toolCalls.some(
+	(tc) => currentContext.tools?.find((t) => t.name === tc.name)?.executionMode === "sequential",
+);
+if (config.toolExecution === "sequential" || hasSequentialToolCall) {
+	return executeToolCallsSequential(…);
+}
+return executeToolCallsParallel(…);
+```
+
+**只要这批里有一个工具标了 `executionMode: "sequential"`，整批都退化成串行。** 不是"那一个串行、其余并行"——**一个拖累全部**。因为串行工具的语义通常是"我在动全局状态"（改文件、跑迁移、切分支），旁边并行跑别的工具就可能读到半途状态。
+
+### 5.2 并行版：先攒任务，再一起放
+
+```typescript
+finalizedCalls.push(async () => {          // ← 不是 push 结果，是 push 一个函数
+	const executed = await executePreparedToolCall(preparation, signal, emit);
+	const finalized = await finalizeExecutedToolCall(…);
+	await emitToolExecutionEnd(finalized, emit);
+	return finalized;
+});
+```
+
+循环里只"攒任务"不 `await`，攒完一起放（`:571`）：
+
+```typescript
+const orderedFinalizedCalls = await Promise.all(
+	finalizedCalls.map((entry) => (typeof entry === "function" ? entry() : Promise.resolve(entry))),
+);
+```
+
+**变量名里的 `ordered` 是关键**：`Promise.all` 保证输出顺序与输入一致，与谁先跑完无关。所以后面生成的 `toolResult` 消息顺序 = **模型发起调用的顺序**，不是完成顺序。读大文件慢、小文件快，结果排列仍按原序——**上下文是确定性的，重放不会因网络快慢而不同**。
+
+那句 `typeof entry === "function"` 在分辨数组里的两种元素：**要么是待执行的函数，要么是现成结果**。现成结果来自 `preparation.kind === "immediate"`（`:539`）——工具名不存在、参数校验失败、被扩展的 `tool_call` 钩子拦下，这类根本不用执行就有答案，不必进等待队列。
+
+### 5.3 串行版多一件事：逐个检查中断
+
+```typescript
+if (signal?.aborted) {
+	break;                    // :509
+}
+```
+
+**每执行完一个就检查一次。** 按 Esc 后剩下的工具不再跑，但**已跑完的结果保留**——`messages` 数组里已有的照样返回。
+
+并行版做不到这么细：任务都已放出去，只能靠传进去的 `signal` 让各个工具自己响应中断（写扩展工具时循环里那句 `if (signal?.aborted) break` 就是干这个的）。
+
+### 5.4 每个工具执行发三类事件
+
+```typescript
+emit({ type: "tool_execution_start", toolCallId, toolName, args });   // 开始
+// …执行中，工具自己调 onUpdate 会发 tool_execution_update
+emitToolExecutionEnd(finalized, emit);                                // 结束
+emitToolResultMessage(toolResultMessage, emit);                       // 结果消息生成了
+```
+
+**`tool_execution_start` 是在 `prepareToolCall` 之前发的**——所以即使工具名不存在、参数校验失败，界面上也会先出现这个工具块，再立刻变成错误状态。这解释了一个观察得到的现象：`tool_execution_start` 比扩展的 `tool_call` 钩子还早。
+
+中间那个 `tool_execution_update` 就是工具 `onUpdate` 回调的出口——**与第 4 章 `partial` 同一个模式：每次上报一份完整的半成品快照，消费者无需自己攒状态。**
+
+### 5.5 `terminate`：工具可以叫停整个循环
+
+```typescript
+return { messages, terminate: shouldTerminateToolBatch(finalizedCalls) };
+```
+
+回到主循环（`:232`）：
+
+```typescript
+hasMoreToolCalls = !executedToolBatch.terminate;
+```
+
+**某些工具执行完之后 agent 不再继续问模型，直接收工。** 典型是"任务完成"类工具——模型调用它表示自己干完了，没必要再来一轮。
+
+---
+
+## 第 6 章 T4–T5 段：循环怎么转
+
+### 6.1 两层循环，不是一层
+
+```typescript
+while (true) {                                              // :180 外层
+	let hasMoreToolCalls = true;
+
+	while (hasMoreToolCalls || pendingMessages.length > 0) { // :185 内层
+		…
+	}
+
+	const followUpMessages = (await config.getFollowUpMessages?.()) || [];
+	if (followUpMessages.length > 0) {
+		pendingMessages = followUpMessages;
+		continue;                                            // :286 回外层
+	}
+	break;                                                   // :291 真的结束
+}
+```
+
+| | 管什么 | 什么时候转 |
+| --- | --- | --- |
+| **内层** | 工具调用来回 | 模型还要调工具、或有插话消息 |
+| **外层** | 收工之后的回心转意 | agent 本来要停了，但用户又发了消息 |
+
+`hasMoreToolCalls` 初值是 `true`（`:181`），所以**内层至少跑一次**——否则第一个请求都发不出去。
+
+### 6.2 内层一圈的顺序
+
+```text
+① turn_start 事件                                    :188
+② 注入 pendingMessages（插话）                        :195   ← 在请求之前
+③ streamAssistantResponse（T0–T2）                    :206
+④ 检查 error/aborted → 直接 return                    :209
+⑤ filter 工具调用 → 执行 → 结果 push 进 context       :217-237
+⑥ turn_end 事件                                       :240
+⑦ prepareNextTurn 钩子（可换 context / model）        :249
+⑧ shouldStopAfterTurn 钩子 → 可能 return              :264
+⑨ 抓下一批 steering messages                          :276
+```
+
+**②在③前面**，这是"插话"能生效的原因：
+
+```typescript
+if (pendingMessages.length > 0) {
+	for (const message of pendingMessages) {
+		await emit({ type: "message_start", message });
+		await emit({ type: "message_end", message });
+		currentContext.messages.push(message);     // 塞进上下文
+		newMessages.push(message);
+	}
+	pendingMessages = [];
+}
+```
+
+模型正在干活时你打字，消息**不打断当前这轮，而是排队等下一次请求带上**。
+
+### 6.3 三种"继续"的理由
+
+- **模型要调工具** —— `hasMoreToolCalls = !executedToolBatch.terminate`（`:232`）
+- **有 steering message** —— 每轮结束抓一次（`:276`），指"agent 干活期间说的话"
+- **有 follow-up message** —— 内层已退出，外层再捞一次（`:281`），指"agent 都准备收摊了才说的话"
+
+后两者的区别只是**时机**。coding-agent 侧两个方法在 `agent-session.ts:1725` / `:1731`。
+
+### 6.4 三个出口
+
+```typescript
+// ① 出错或中断，立刻走
+if (message.stopReason === "error" || message.stopReason === "aborted") { … return; }   // :212
+
+// ② 钩子说停
+if (await config.shouldStopAfterTurn?.({ … })) { … return; }                            // :273
+
+// ③ 正常走完，内外层都没活了
+break;                                                                                   // :291
+```
+
+①② 是 `return`，③ 是 `break` 后落到函数末尾那句 `agent_end`（`:294`）。**三条路都会发 `agent_end`。**
+
+### 6.5 `prepareNextTurn`：每轮之间换装的机会
+
+```typescript
+const nextTurnSnapshot = await config.prepareNextTurn?.(nextTurnContext);
+if (nextTurnSnapshot) {
+	currentContext = nextTurnSnapshot.context ?? currentContext;    // ← 整个上下文可以被换掉
+	config = {
+		...config,
+		model: nextTurnSnapshot.model ?? config.model,               // ← 模型可以换
+		reasoning: …,                                                // ← 思考等级可以换
+	};
+}
+```
+
+**`currentContext` 整个可以被替换——这就是压缩的插入点。** 上一轮结束后发现 token 快满，压缩一次，把新的（短得多的）context 交回来，下一轮就用新的发请求。coding-agent 在 `agent-session.ts:584` 接管了这个钩子。
+
+时间线上它落在 **T4 和 T5 之间**：工具结果已进上下文，下一个请求还没发出去。第 8 篇学的自动压缩（`shouldCompact`）就是从这里被触发的。
+
+### 6.6 上下文是一路带着走的同一个数组
+
+```typescript
+currentContext.messages.push(result);      // :235
+```
+
+工具结果直接 push 进去，**下一轮的请求自然就包含了全部历史，不需要任何"重新组装"的动作**。这正是第 1 章那条"每轮重发全部历史"在代码里的样子。
+
+---
+
+## 第 7 章 T6 段：落回会话树
+
+### 7.1 落盘的触发点是 `message_end`
+
+```typescript
+// agent-session.ts:694
+if (event.type === "message_end") {
+	if (event.message.role === "custom") {
+		this.sessionManager.appendCustomMessageEntry(customType, content, display, details);
+	} else if (
+		event.message.role === "user" ||
+		event.message.role === "assistant" ||
+		event.message.role === "toolResult"
+	) {
+		this.sessionManager.appendMessage(event.message);
+	}
+}
+```
+
+**不是"一轮结束批量写"，是每条消息各自落盘。** agent 每发一个 `message_end`，coding-agent 就追加一条 entry：
+
+```text
+T2  assistant 消息完整  → message_end → appendMessage → .jsonl 多一行
+T4  toolResult 生成    → message_end → appendMessage → .jsonl 多一行
+T4  toolResult 生成    → message_end → appendMessage → .jsonl 多一行
+```
+
+每条消息一落地就写盘，**中途崩溃也不丢已完成的部分**。
+
+### 7.2 写的两条路，正是第 9 篇读的两条路
+
+| 写（本章） | 存储形态 | 读（第 9 篇 5.1） |
+| --- | --- | --- |
+| `appendMessage(message)` | 整个消息嵌套在 `message` 字段里 | **剥离**：`return [message]` |
+| `appendCustomMessageEntry(type, content, …)` | 字段平铺 | **重建**：`createCustomMessage(…)` |
+
+**嵌套还是平铺，是在写的这一刻决定的。** 第 9 篇那条"载荷是外来对象就整体存，是自家字段就拆开存"的规律，源头在这里。
+
+注释还点名了三个例外：
+
+```typescript
+// 其他消息类型（bashExecution、compactionSummary、branchSummary）由别处负责持久化
+```
+
+它们不走 agent 循环，因为**不是模型产出的**：`bashExecution` 来自 `!` 命令本地执行（`agent-session.ts:3126` / `:3168`）、`compactionSummary` 来自压缩流程（`appendCompaction`，第 8 篇）、`branchSummary` 来自分支流程。**`message_end` 只管"agent 循环里流过的消息"。**
+
+### 7.3 自动压缩在这里埋线
+
+```typescript
+// 跟踪助手消息，供 agent_end 时执行自动压缩检查
+if (event.message.role === "assistant") {
+	this._lastAssistantMessage = event.message;
+	…
+}
+```
+
+每条 assistant 消息都记一份引用，留到 `agent_end` 时判断要不要压缩。**因为 assistant 消息带着 `usage`，知道当前烧了多少 token**——判断"该不该压缩"的数据就从这条消息上取。
+
+### 7.4 圆闭合了
+
+```text
+              ┌─────────────── 第 9 篇 ───────────────┐
+              ▼                                       │
+        SessionEntry[] ──► path ──► messages ──► Context ──► HTTP 请求
+         （会话树）                                             │
+              ▲                                                ▼
+              │                                           SSE 字节流
+        appendMessage                                          │
+              ▲                                      事件协议（第 2–3 章）
+              │                                                │
+        message_end ◄── agent-loop ◄── AssistantMessage ◄── 状态机（第 4 章）
+              │              │
+              │              └──► 工具执行（第 5 章）──► toolResult ──┐
+              │                                                       │
+              └───────────────────────────────────────────────────────┘
+              └─────────────── 第 10 篇 ───────────────┘
+```
+
+一轮结束，树上多了 1 条 assistant + N 条 toolResult，`leafId` 指向最新那条。下一轮第 9 篇那条链路从新 leaf 重新爬一遍——**因为树长高了，所以路径变长了，所以上下文涨了，所以迟早要压缩。**
+
+这一圈顺带解释了几件散落的事：
+
+| 现象 | 答案在这一圈的哪一段 |
+| --- | --- |
+| 为什么上下文会涨 | T6 每轮追加，第 9 篇每轮全量重读 |
+| 为什么 `/new` 不是 `/clear` | T6 只追加不删，`/new` 只是把 `leafId` 挪走（第 8 篇） |
+| 扩展 `appendEntry` 存的状态为什么不进上下文 | 它走第三条路（`type: "custom"`），被第 9 篇 5.1 的 `:449` 挡住 |
+| 扩展的 `tool_result` 钩子在哪插手 | T3 与 T4 之间，结果生成之后、落盘之前 |
+| `onUpdate` 流式上报到哪去了 | T3 里的 `tool_execution_update` 事件 → TUI 重绘 |
+
+---
+
+## 第 8 章 工程模式清单
+
+本篇涉及的可迁移设计模式：
+
+1. **两级缓冲对付流式切分**：`buffer` 兜半行、`TextDecoder` 的 `stream: true` 兜半个字符。**凡是从流里切结构，都要问"切在中间怎么办"**（3.3）。
+2. **小函数 + 循环重复**：`consumeLine` 一次切一行、`decodeSseLine` 一次吃一行，复杂度交给外面的 while。**每个函数小到一眼能验对错**（3.4）。
+3. **状态外置**：`decodeSseLine` 本身无记忆，`state` 由调用方持有。好测（给一行、给一个 state，检查 state）、好复位（换个空 state 就重新开始）。
+4. **白名单而非黑名单**：只认六种 SSE 事件，其余跳过。**新增事件不会把老客户端搞崩**（3.5）。
+5. **协议层的配对检查**：`sawMessageStart && !sawMessageEnd`。HTTP 层的"正常结束"不等于协议层的完整——**传输成功不代表内容完整**（3.5）。
+6. **报错要带原始输入**：`raw: string[]` 平时无用，只在解析失败时救命。**调试流式协议时，"解析失败"四个字毫无价值**（3.5）。
+7. **推送完整快照而非纯增量**：`partial` / `onUpdate(snapshot)` 同一模式。**把"状态一致性"从每个消费者身上收归到生产者一处**（4.1、5.4）。
+8. **脚手架字段搭完就拆**：`index` / `partialJson` 用完 `delete`，因为这条消息要落盘（4.4）。**临时字段和持久化数据共用一个对象时，必须显式清理。**
+9. **方言在边界层吃掉**：`redacted_thinking` 折进 `thinking` + `redacted` 标记，provider 编号换算成自己的 `contentIndex`。**上层永远不该知道下层的方言**（4.3、4.7）。
+10. **不透明数据原样转手**：`thinkingSignature` 读不懂也不能扔，下轮要回传（4.7）。**"我看不懂"不等于"可以丢"。**
+11. **一个拖累全部的降级策略**：一个 sequential 工具让整批退化成串行（5.1）。**并发安全上，保守是唯一正确的默认。**
+12. **并发执行、确定性排序**：`Promise.all` 保证结果顺序等于输入顺序，与完成先后无关（5.2）。**上下文必须可重放，不能受网络快慢影响。**
+13. **异常路径也要计量**：`usage` 在 `message_start` 就记，中断了也能算账（4.8）。
+14. **"非空才覆盖"的防御式合并**：避免上游省略字段时把已有数据冲掉（4.8）。
+15. **钩子放在状态切换的缝隙**：`prepareNextTurn` 落在"工具结果已入上下文、下个请求未发出"之间，压缩才有机会整个替换 context（6.5）。
+
+---
+
+## 第 9 章 复习自测
+
+尝试不看正文回答：
+
+1. 工具是流到一半就开始执行，还是等整条消息收完？三条理由分别是什么？
+2. `stopReason` 为 `length` 时，这批工具调用会怎样处理？为什么不能照常执行？
+3. 每轮请求带的是增量还是全部历史？这解释了哪三个现象？
+4. 12 个事件的规律是什么？完全忽略 `delta` 事件还能不能拿到完整数据？
+5. `partial` 是快照副本还是同一个对象引用？这带来什么好处和什么限制？
+6. `contentIndex` 是事件编号还是数组下标？模型连说十句话中间没干别的，会产生几块内容？
+7. 为什么 `toolCall` 不能塞进 `TextContent`？最硬的那条理由是什么？
+8. `buffer` 和 `TextDecoder` 的 `stream: true` 分别在兜什么？少了任意一个会发生什么？
+9. `decodeSseLine` 一次处理几行？它什么时候返回非 `null`？记忆存在哪里？
+10. `sawMessageStart && !sawMessageEnd` 检查的是什么场景？为什么 HTTP 层发现不了？
+11. `Block` 类型上那两个脚手架字段是什么？为什么必须在 `content_block_stop` 时删掉？
+12. `redacted_thinking` 为什么折进 `thinking` 而不新建第四种内容类型？它的 `thinkingSignature` 和普通思考的有何不同？
+13. 一批工具里有一个标了 `sequential`，其余会怎样？为什么这么设计？
+14. 并行执行时，`toolResult` 消息的顺序由什么决定？为什么不能用完成顺序？
+15. agent-loop 为什么是两层循环？各自的退出条件是什么？
+16. steering message 和 follow-up message 的区别是什么？插话为什么不会打断当前这一轮？
+17. 自动压缩挂在哪个钩子上？它在时间线的哪两个点之间执行？为什么必须在那里？
+18. 落盘的触发事件是什么？哪三种消息类型不走这条路，为什么？
+19. `appendMessage` 与 `appendCustomMessageEntry` 的存储形态有何不同？这与第 9 篇的"剥离 vs 重建"是什么关系？
+20. 把第 9 篇和本篇接起来，说出"上下文为什么会涨"的完整因果链。
+
+---
+
+*基于 2026-08-16 的源码精读整理（对话式逐行走读）。与第 9 篇配对：09 讲"出去"（会话历史 → LLM 请求），本篇讲"回来"（LLM 响应 → 会话历史）。provider 层以 Anthropic 为唯一样本，其余十余家是同一件事的不同方言。*
