@@ -16,7 +16,7 @@
 - 第 4 章 事件协议：模型吐字的切分规则（路旁参照表）
 - 第 5 章 T3 段：工具执行
 - 第 6 章 T4–T5 段：循环怎么转
-- 第 7 章 T6 段：落回会话树
+- 第 7 章 ⭳ 落盘：散落在 T2 与 T4，落回会话树
 - 第 8 章 工程模式清单
 - 第 9 章 复习自测
 
@@ -51,6 +51,7 @@ T1   ── SSE 流开始，事件逐个到达 ───────────
         done            reason: "toolUse"      ┘
 
 T2   ── 连接结束，AssistantMessage 完整 ──────────────────────
+     ⭳ message_end → appendMessage → .jsonl 多一行（assistant）
 
 T3   ── agent-loop 醒过来（agent-loop.ts:217）────────────────
         filter 出 2 个 toolCall
@@ -60,7 +61,9 @@ T3   ── agent-loop 醒过来（agent-loop.ts:217）────────�
 
 T4   ── 结果包成 toolResult 消息（:235）─────────────────────
         { role:"toolResult", toolCallId:"c1", content:[…] }
+     ⭳  message_end → appendMessage → .jsonl 多一行
         { role:"toolResult", toolCallId:"c2", content:[…] }
+     ⭳  message_end → appendMessage → .jsonl 多一行
         currentContext.messages.push(result)
 
 T5   ── while 循环回到顶部，HTTP 请求 ② 发出 ─────────────────
@@ -69,8 +72,10 @@ T5   ── while 循环回到顶部，HTTP 请求 ② 发出 ──────
                 tools: […] }
                           ↑ 全部历史重新发一遍
 
-T6   ── 新一轮 SSE 流…… 直到某次 done 的 reason 是 "stop" ────
+T6   ── 循环继续…… 直到某次 done 的 reason 是 "stop"，agent_end ─
 ```
+
+`⭳` 标的是**落盘时刻**。注意它不是流程末尾的一次批量写入，而是**散落在 T2 和 T4、每条消息各自落地**（第 7 章）——所以上面这一圈实际写了三行 `.jsonl`：1 条 assistant + 2 条 toolResult。中途崩溃时，已落地的部分不丢。
 
 ### 1.1 三条必须记住的规则
 
@@ -623,7 +628,7 @@ output 完整               :779 循环结束
    ↓ done 事件带出去 → agent-loop 收到，变成 message
    ├─► filter 出 toolCall → 执行工具                      （第 5 章，T3）
    ├─► push 进 currentContext.messages → 下一轮重发        （第 6 章，T5）
-   └─► message_end → appendMessage → .jsonl              （第 7 章，T6）
+   └─► message_end → appendMessage → .jsonl              （第 7 章，⭳）
 ```
 
 **从一个空对象开始，攒满，然后同时成为"下一轮的输入"和"磁盘上的一行"。** 圆就是在这里合上的——后面三章都是在讲这三条支路。
@@ -925,13 +930,17 @@ runAgentLoop(…)                                      agent-loop.ts
             │         └─ for await (const event of iterateAnthropicEvents(…)) {
             │              …                          ← 第 2、3 章讲的就是这个循环
             │            }                            ← T1、T2
+            │                                     ⭳ message_end → .jsonl（assistant）
             │
             ├─ executeToolCalls(…)                    // :230  ← 第 5 章，T3
+            │                                     ⭳ message_end → .jsonl（每条 toolResult）
             ├─ 结果 push 进 currentContext.messages    // :235  ← T4
             └─（回到内层顶部，发下一个请求）            ← T5
           }
      }
 ```
+
+图里的 `⭳` 是**落盘时刻**（第 7 章）。它挂在内层 while 的循环体里，**每转一圈就往 `.jsonl` 追加 1 + N 行**（1 条 assistant，N 条 toolResult）——这正是"树为什么每轮都长高"的直接原因。
 
 **第 2、3 章那个 `for await` 是最内层**，它转几十上百圈才产出**一条** assistant 消息——而那只是内层 while 一圈里的一小段。对回第 1 章的时间线：
 
@@ -942,7 +951,9 @@ T2  │    └─ for await 结束，output 完整
 T3  │  executeToolCalls
 T4  │  结果入 context
 T5 ─┴─ 内层 while 第 2 圈开始  ← 就是"回到顶部"
-T6     （落盘散落在 T2 和 T4，由 message_end 触发，见第 7 章）
+T6     内层 while 退出条件不成立时收工，agent_end
+
+ ⭳     落盘不是一个阶段——它散落在 T2 与 T4，由 message_end 逐条触发（第 7 章）
 ```
 
 **第 1 章那条时间线，画的就是内层 while 的一圈半。**
@@ -1063,7 +1074,7 @@ currentContext.messages.push(result);      // :235
 
 ---
 
-## 第 7 章 T6 段：落回会话树
+## 第 7 章 ⭳ 落盘：散落在 T2 与 T4，落回会话树
 
 ### 7.1 落盘的触发点是 `message_end`
 
@@ -1147,8 +1158,8 @@ if (event.message.role === "assistant") {
 
 | 现象 | 答案在这一圈的哪一段 |
 | --- | --- |
-| 为什么上下文会涨 | T6 每轮追加，第 9 篇每轮全量重读 |
-| 为什么 `/new` 不是 `/clear` | T6 只追加不删，`/new` 只是把 `leafId` 挪走（第 8 篇） |
+| 为什么上下文会涨 | 每轮 ⭳ 追加 1+N 行，第 9 篇每轮全量重读 |
+| 为什么 `/new` 不是 `/clear` | ⭳ 只追加不删，`/new` 只是把 `leafId` 挪走（第 8 篇） |
 | 扩展 `appendEntry` 存的状态为什么不进上下文 | 它走第三条路（`type: "custom"`），被第 9 篇 5.1 的 `:449` 挡住 |
 | 扩展的 `tool_result` 钩子在哪插手 | T3 与 T4 之间，结果生成之后、落盘之前 |
 | `onUpdate` 流式上报到哪去了 | T3 里的 `tool_execution_update` 事件 → TUI 重绘 |
