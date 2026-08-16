@@ -520,18 +520,68 @@ Anthropic 的 6 种事件  ──►  ① 翻译成中立的 12 种事件（push
                        └──►  ② 往 output 这个对象上攒（拼出完整消息）
 ```
 
-`output` 从一个空壳开始（`:522`），流结束时它就是完整的 `AssistantMessage`：
+### 4.0 先看骨架：一个循环，一个 `output`
+
+后面几节会拆开讲各个分支，但**先要看清它们都长在同一个循环里**——否则容易把那些 `if (event.type === …)` 看成互不相干的片段：
 
 ```typescript
-const output: AssistantMessage = {
-	role: "assistant",
-	content: [],                    // ← 空的，边收边填
-	api: model.api,
-	provider: model.provider,
-	model: model.id,
-	usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { … } },
+export const stream = (model, context, options) => {
+	const stream = new AssistantMessageEventStream();
+
+	(async () => {
+		const output: AssistantMessage = {          // ← ① 只创建一次，整条流共用
+			role: "assistant",
+			content: [],                             //    空的，边收边填
+			api: model.api,
+			provider: model.provider,
+			model: model.id,
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { … } },
+		};
+
+		stream.push({ type: "start", partial: output });          // :595
+
+		for await (const event of iterateAnthropicEvents(response, options?.signal)) {   // :600
+			// ② 每转一圈 = 一个 Anthropic 事件
+			if (event.type === "message_start") { … }            // 改 output.usage
+			else if (event.type === "content_block_start") { … } // output.content.push(新块)
+			else if (event.type === "content_block_delta") { … } // 已有块 += 增量
+			else if (event.type === "content_block_stop") { … }  // 收尾、删脚手架
+			else if (event.type === "message_delta") { … }       // 改 output.stopReason / usage
+		}
+
+		stream.push({ type: "done", reason: output.stopReason, message: output });   // ③ :792
+		stream.end();
+	})();
+
+	return stream;
 };
 ```
+
+三件事要记住：
+
+**① `output` 在循环外创建，只有一个。** 第 3 章那条流水线上，前面几层都是"一个接一个流过去"，到这里换成"一直在那儿、越蓄越满"：
+
+| 层 | 一次响应里有多少个 |
+| --- | --- |
+| 行 | 几百上千 |
+| `ServerSentEvent` | 几十上百 |
+| `RawMessageStreamEvent` | 几十上百 |
+| **`output`** | **1 个** |
+
+**前面是流水，`output` 是水池。** 这也解释了为什么 `partial: output` 每次都是同一个对象——它本来就只有一个（见 4.1）。
+
+**② 每转一圈处理一个事件，同时干两件事**：改 `output`，并向下游 `push` 一个中立事件。
+
+```typescript
+block.text += event.delta.text;                                // ← 攒进 output
+stream.push({ type: "text_delta", …, partial: output });        // ← 通知下游
+```
+
+**一个进（Anthropic 的事件），两个出（改 output + 发中立事件）。**
+
+注意对 `output` 的操作**有三种，不都是 push**：`content_block_start` 才 `output.content.push(block)`（数组多一格）、`content_block_delta` 是 `block.text += …`（往已有那格追加）、`message_start` / `message_delta` 是 `output.usage.x = …`（改顶层字段）。
+
+**③ 循环跑完，`output` 就完整了**，作为 `done` 事件的 `message` 发出去（去向见 4.9）。
 
 ### 4.1 `partial` 不是拷贝
 
@@ -708,6 +758,60 @@ if (event.usage.input_tokens != null) {
 注释：*仅用非空字段更新统计，**避免代理在 message_delta 省略字段时覆盖 message_start 的输入令牌数***。有些第三方代理转发时会把 `input_tokens` 置空，无脑赋值会把先前记下的数字冲掉。
 
 还有一处很实在的注释（`:762`）：推理令牌位于 `output_tokens_details.thinking_tokens`，**当前 SDK 类型尚未声明该字段，因此用窄类型断言读取，字段结构已通过真实 API 验证**。官方 SDK 的类型定义落后于真实 API，pi 用窄断言绕过并注明验证来源——**将来 SDK 补上类型时，一眼能看出这段可以清理**。
+
+### 4.9 `output` 攒完之后去哪了
+
+循环跑完（`:779`），`output` 就是一条完整的 `AssistantMessage`。它作为 `done` 事件的 `message` 字段发出去（`:792`）：
+
+```typescript
+stream.push({ type: "done", reason: output.stopReason, message: output });
+stream.end();
+```
+
+异常路径走 `catch`（`:794-804`）——**中断或出错时 `output` 照样发出去**，只是装在 `error` 字段里：
+
+```typescript
+} catch (error) {
+	for (const block of output.content) {
+		delete (block as { index?: number }).index;
+		// partialJson 仅用于流式拼接，不能进入持久化或重放数据。
+		delete (block as { partialJson?: string }).partialJson;
+	}
+	output.stopReason = options?.signal?.aborted ? "aborted" : "error";
+	output.errorMessage = error instanceof Error ? error.message : JSON.stringify(error);
+	stream.push({ type: "error", reason: output.stopReason, error: output });
+}
+```
+
+**这就是按 Esc 还能保留半截回复的原因**（第 1 章 1.2 那张表里的最后一条）。注意它先手动清了一遍脚手架字段：正常路径上这些是在 `content_block_stop` 里逐块删的（4.4），异常路径没走到那儿，得在这补一刀。
+
+然后一路往上：
+
+```text
+:792  stream.push({ type: "done", message: output })
+        ↓
+      AssistantMessageEventStream
+        ↓
+      agent-loop.ts:343   for await (const event of response) { … }
+        ↓
+      streamAssistantResponse 返回这条 AssistantMessage
+        ↓
+      agent-loop.ts:206   const message = await streamAssistantResponse(…)
+```
+
+到这里它换了个名字叫 `message`，随即分三路：
+
+```text
+output 诞生（空壳）        anthropic-messages.ts:522
+   ↓ 边收边攒（几十上百圈）
+output 完整               :779 循环结束
+   ↓ done 事件带出去 → agent-loop 收到，变成 message
+   ├─► filter 出 toolCall → 执行工具                      （第 5 章，T3）
+   ├─► push 进 currentContext.messages → 下一轮重发        （第 6 章，T5）
+   └─► message_end → appendMessage → .jsonl              （第 7 章，T6）
+```
+
+**从一个空对象开始，攒满，然后同时成为"下一轮的输入"和"磁盘上的一行"。** 圆就是在这里合上的——后面三章都是在讲这三条支路。
 
 ---
 
@@ -1030,7 +1134,7 @@ if (event.message.role === "assistant") {
 8. `buffer` 和 `TextDecoder` 的 `stream: true` 分别在兜什么？少了任意一个会发生什么？
 9. `decodeSseLine` 一次处理几行？它什么时候返回非 `null`？记忆存在哪里？
 10. `sawMessageStart && !sawMessageEnd` 检查的是什么场景？为什么 HTTP 层发现不了？
-11. `Block` 类型上那两个脚手架字段是什么？为什么必须在 `content_block_stop` 时删掉？
+11. `Block` 类型上那两个脚手架字段是什么？为什么必须在 `content_block_stop` 时删掉？异常路径上谁来补这一刀？
 12. `redacted_thinking` 为什么折进 `thinking` 而不新建第四种内容类型？它的 `thinkingSignature` 和普通思考的有何不同？
 13. 一批工具里有一个标了 `sequential`，其余会怎样？为什么这么设计？
 14. 并行执行时，`toolResult` 消息的顺序由什么决定？为什么不能用完成顺序？
@@ -1039,7 +1143,9 @@ if (event.message.role === "assistant") {
 17. 自动压缩挂在哪个钩子上？它在时间线的哪两个点之间执行？为什么必须在那里？
 18. 落盘的触发事件是什么？哪三种消息类型不走这条路，为什么？
 19. `appendMessage` 与 `appendCustomMessageEntry` 的存储形态有何不同？这与第 9 篇的"剥离 vs 重建"是什么关系？
-20. 把第 9 篇和本篇接起来，说出"上下文为什么会涨"的完整因果链。
+20. 一次响应里，行、`ServerSentEvent`、`RawMessageStreamEvent`、`output` 各有多少个？为什么 `output` 是特殊的那一个？
+21. `output` 攒完之后分几路、各去了哪？中断时它还会被发出去吗？
+22. 把第 9 篇和本篇接起来，说出"上下文为什么会涨"的完整因果链。
 
 ---
 
