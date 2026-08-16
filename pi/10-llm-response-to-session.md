@@ -11,9 +11,9 @@
 ## 目录
 
 - 第 1 章 全景：一轮的完整时间线
-- 第 2 章 事件协议：模型吐字的切分规则
-- 第 3 章 T1 段：SSE 解析器怎么把字节变成事件
-- 第 4 章 T2 段：`AssistantMessage` 怎么攒出来
+- 第 2 章 T1 段：SSE 解析器怎么把字节变成事件
+- 第 3 章 T2 段：`AssistantMessage` 怎么攒出来
+- 第 4 章 事件协议：模型吐字的切分规则（路旁参照表）
 - 第 5 章 T3 段：工具执行
 - 第 6 章 T4–T5 段：循环怎么转
 - 第 7 章 T6 段：落回会话树
@@ -126,194 +126,9 @@ const executedToolBatch =
 
 ---
 
-## 第 2 章 事件协议：模型吐字的切分规则
+## 第 2 章 T1 段：SSE 解析器怎么把字节变成事件
 
-模型回话不是一次性到达的，是一个字一个字流过来的。**事件协议就是把这个连续过程切成离散事件的规则**：会发出哪些事件、按什么顺序、每个带什么数据。
-
-`packages/ai/src/types.ts:572`：
-
-```typescript
-export type AssistantMessageEvent =
-	| { type: "start"; partial: AssistantMessage }
-	| { type: "text_start"; contentIndex: number; partial: AssistantMessage }
-	| { type: "text_delta"; contentIndex: number; delta: string; partial: AssistantMessage }
-	| { type: "text_end"; contentIndex: number; content: string; partial: AssistantMessage }
-	| { type: "thinking_start"; contentIndex: number; partial: AssistantMessage }
-	| { type: "thinking_delta"; contentIndex: number; delta: string; partial: AssistantMessage }
-	| { type: "thinking_end"; contentIndex: number; content: string; partial: AssistantMessage }
-	| { type: "toolcall_start"; contentIndex: number; partial: AssistantMessage }
-	| { type: "toolcall_delta"; contentIndex: number; delta: string; partial: AssistantMessage }
-	| { type: "toolcall_end"; contentIndex: number; toolCall: ToolCall; partial: AssistantMessage }
-	| { type: "done"; reason: Extract<StopReason, "stop" | "length" | "toolUse">; message: AssistantMessage }
-	| { type: "error"; reason: Extract<StopReason, "aborted" | "error">; error: AssistantMessage };
-```
-
-12 个事件，别被数量吓到——**规律是 3×3 + 3**：
-
-```text
-          start      delta      end
-text        ●          ●         ●
-thinking    ●          ●         ●
-toolcall    ●          ●         ●
-
-外加：start（整条消息开始）、done（成功终结）、error（失败终结）
-```
-
-三类内容，每类都是"开始 → 若干增量 → 结束"。**认识一类就认识全部。**
-
-它保证三件事：
-
-- **顺序**：`start` 一定最先，`done` 或 `error` 一定最后（源码注释：*Streams should emit `start` before partial updates, then terminate with either `done` … or `error` …*）；
-- **完整性**：`xxx_end` 携带这一块的完整内容，`done` 携带整条消息。**完全不管 delta、只等 end 和 done，照样拿到全部数据**——delta 是给"要实时显示"的人用的（TUI 的打字机效果），`-p` 一次性模式直接等 `done` 即可；
-- **有且只有一个终结事件**：不会两个都来，也不会一个都不来。
-
-### 2.1 `partial`：每个事件都带一份完整快照
-
-```typescript
-| { type: "text_delta"; contentIndex: number; delta: string; partial: AssistantMessage }
-//                                            ↑ 这次新增的     ↑ 到目前为止的完整状态
-```
-
-**不是只给增量，而是"增量 + 当前完整快照"一起给。** 好处是消费者不必自己攒状态：
-
-```typescript
-// ❌ 只给 delta，消费者被迫维护状态，还得担心漏事件、乱序
-let text = "";
-on("text_delta", (e) => { text += e.delta; render(text); });
-
-// ✅ 给 partial，消费者完全无状态
-on("text_delta", (e) => render(e.partial));
-```
-
-TUI 收到任何一个事件，直接拿 `partial` 重画即可。
-
-**这个模式在 pi 里是一以贯之的**：写扩展工具时 `execute` 收到的 `onUpdate` 回调，约定同样是"每次传一份完整的半成品结果"，而非只传增量。看似浪费，实则把"状态一致性"这件麻烦事从每个消费者身上收归到生产者一处。
-
-### 2.2 `contentIndex`：`content` 数组的下标
-
-一条 assistant 消息的 `content` 是数组（`types.ts:463`）：
-
-```typescript
-content: (TextContent | ThinkingContent | ToolCall)[];
-//   下标   0             1                2
-```
-
-`contentIndex: 2` 就是"这个事件属于 `content[2]`"。**只有一个编号系统**——三种类型共用同一串连续下标，不各数各的：
-
-```text
-content[0]  thinking     contentIndex 0
-content[1]  text         contentIndex 1
-content[2]  toolCall     contentIndex 2
-content[3]  toolCall     contentIndex 3
-```
-
-第 2 块是 toolCall，编号就是 2，不会因为"这是第 0 个 toolCall"而变成 0。
-
-**分块的依据是类型切换，不是句子边界。** 模型连说十句话中间没干别的，那也只有 1 块——`text_start` → 几十个 `delta` → `text_end`，`contentIndex` 全程是 0。顺序也不固定，`text → toolCall → text → toolCall` 完全合法。**`contentIndex` 只表示"在数组的第几格"，不表示类型顺序。**
-
-它最要紧的用途是**给交错到达的增量归位**：
-
-```text
-toolcall_delta  contentIndex 2   delta '{"pa'
-toolcall_delta  contentIndex 3   delta '{"pat'
-toolcall_delta  contentIndex 2   delta 'th":"AGENTS'      ← 接回第 2 块
-toolcall_delta  contentIndex 4   delta '{"path"'
-```
-
-三个工具调用的参数 JSON 同时在流，没有 index 就全糊成一团。**这与工具执行时用 `toolCallId` 把界面更新分派到对应组件，是同一个问题的同一种解法：并发的多路更新，靠一个 key 各归各位。**
-
-### 2.3 三种内容类型：为什么 `toolCall` 不能塞进 `text`
-
-一个自然的疑问：工具调用不就是模型输出的一段文本吗，为什么要单列一种类型？看结构就明白了。
-
-```typescript
-// types.ts:417
-export interface ToolCall {
-	type: "toolCall";
-	id: string;                       // ← 身份证
-	name: string;                     // ← 调哪个
-	arguments: Record<string, any>;   // ← 已解析好的对象
-}
-
-// types.ts:391
-export interface TextContent {
-	type: "text";
-	text: string;                     // ← 就一坨字符串
-}
-```
-
-**放进 `text` 的话，这三个字段就得自己从字符串里抠出来。** 早期（ReAct 那一代）确实这么干过——让模型输出 `Action: read` / `Action Input: {…}` 再用正则解析。三个问题：
-
-- **分不清"提及"和"执行"**：模型说"你可以用 read 工具读这个文件"，正则一匹配工具就跑了。类型分开之后，**说 read 是文本，调 read 是 toolCall**，语义彻底隔开；
-- **格式随时会歪**：少个引号、JSON 写成单引号，解析就炸。现在 provider 侧有受限采样兜底（`packages/ai/src/api/constrained-sampling.ts`），从生成阶段就保证 JSON 合法；
-- **没有 id，结果配不回去**——这是最硬的理由。
-
-模型一次可发起多个工具调用，结果回来时靠 `id` 认领：
-
-```text
-assistant:   toolCall { id: "c1", name: "read", … }
-             toolCall { id: "c2", name: "read", … }
-             toolCall { id: "c3", name: "bash", … }
-
-toolResult:  { toolCallId: "c2", … }    ← 靠 id 认领，
-toolResult:  { toolCallId: "c1", … }      顺序可以是乱的
-toolResult:  { toolCallId: "c3", … }
-```
-
-到 Anthropic 报文里就是 `tool_use_id` ↔ `tool_use.id` 配对（`anthropic-messages.ts:1155` 的 `convertToolResult`）。**纯文本没地方挂这个 id**——要么自己发明一套编号约定，要么只能串行调用，三个文件三个来回，慢三倍。
-
-`ThinkingContent` 同理（`types.ts:398`），它带着 `thinkingSignature`（provider 返回的不透明推理标识，下一轮要原样回传才能维持推理连续性）和 `redacted`（是否被安全过滤器遮蔽）。**混进 `text` 里这些字段就没地方放了。**
-
-**结论：分成三种类型，是因为它们各自带着不同的结构化元数据，而这些元数据都有硬用途（配对、回传、执行）。挤进一个 `text: string` 就全丢了。**
-
-### 2.4 `done` / `error`：用类型收窄堵死非法组合
-
-```typescript
-| { type: "done";  reason: Extract<StopReason, "stop" | "length" | "toolUse">; message: AssistantMessage }
-| { type: "error"; reason: Extract<StopReason, "aborted" | "error">;           error: AssistantMessage };
-```
-
-`StopReason` 全集有 6 个（`types.ts:453`）：
-
-```typescript
-export type StopReason = "pending" | "stop" | "length" | "toolUse" | "error" | "aborted";
-```
-
-`Extract<T, U>` 是 TypeScript 内置工具类型，**从联合类型 T 里只挑出属于 U 的成员**。于是：
-
-- `done` 的 reason **只可能**是 `stop` / `length` / `toolUse`；
-- `error` 的 reason **只可能**是 `aborted` / `error`；
-- `pending` 一个都不在里面——它是"还没结束"的中间态，不可能出现在终结事件上。
-
-**写一个 `{ type: "done", reason: "aborted" }` 会当场编译报错。** "成功不可能带失败原因"这条协议规则，不靠注释、不靠运行时检查，靠类型定义堵死。
-
-### 2.5 `reason` 其实是在说"接下来谁动"
-
-| reason | 含义 | agent 接下来 |
-| --- | --- | --- |
-| `toolUse` | 模型要调工具 | **执行工具 → 再问一轮**（回到 T3） |
-| `stop` | 模型说完了 | 停，控制权交回用户 |
-| `length` | 撞到 `max_tokens` 上限 | 停；且本轮所有工具调用一律判失败（1.1 ②） |
-| `aborted` | 用户中断 | 停，保留已收到的部分 |
-| `error` | 出错 | 停（`agent-loop.ts:209` 直接 `turn_end` + `agent_end` 返回） |
-
-**`toolUse` 就是那个"再来一轮"的信号**，`agent-loop.ts:180` 那个 `while (true)` 转不转，全看它。所以一次完整的用户交互可能是：
-
-```text
-用户提问
-  → assistant① (toolUse)  → 执行工具 → toolResult
-  → assistant② (toolUse)  → 执行工具 → toolResult
-  → assistant③ (toolUse)  → 执行工具 → toolResult
-  → assistant④ (stop)     → 结束，等用户
-```
-
-四条 assistant 消息、四次 HTTP 请求。**界面上的"一次回答"，底下是十几个来回。**
-
----
-
-## 第 3 章 T1 段：SSE 解析器怎么把字节变成事件
-
-### 3.1 线上流过来的是什么
+### 2.1 线上流过来的是什么
 
 Anthropic 的响应体是一串**文本**，长这样：
 
@@ -330,7 +145,7 @@ data: {"type":"content_block_stop","index":1}
 
 SSE（Server-Sent Events）的规则极简：**每行是 `字段名: 值`；空行表示一个事件结束；`:` 开头的行是注释**。解析器要干的事，就是把字节流切成行、把行攒成事件。
 
-### 3.2 三层生成器叠起来
+### 2.2 三层生成器叠起来
 
 ```text
 ReadableStream<Uint8Array>            原始字节
@@ -340,14 +155,14 @@ ServerSentEvent { event, data, raw }
    │ iterateAnthropicEvents(:473)      过滤 + JSON 解析   ← Anthropic 专属
    ▼
 RawMessageStreamEvent                 Anthropic 的事件对象
-   │ stream(:514)                      翻译成中立事件      ← 变成 12 种之一（第 4 章）
+   │ stream(:514)                      翻译成中立事件      ← 变成 12 种之一（第 3 章）
    ▼
 AssistantMessageEvent
 ```
 
 每层只干一件事，且都是 `async function*`（异步生成器）——**上游一有数据下游就能拿到，不必等全部收完**。
 
-### 3.3 核心工程点：一个事件可能被切成两半
+### 2.3 核心工程点：一个事件可能被切成两半
 
 网络不保证按行送达。某次 `read()` 拿到的可能是：
 
@@ -409,7 +224,7 @@ while (true) {
 
 `decoder.decode(value, { stream: true })` 的 `stream: true` 是同一道理的**字符级**版本：一个中文字 UTF-8 占 3 字节，chunk 边界可能切在中间。加了这个标记，`TextDecoder` 会把半个字符留着等下一块；不加则解出 `�`，且再也补不回来。**`buffer` 管半行，`stream: true` 管半个字，两层保险。**
 
-### 3.4 `decodeSseLine`：攒事件的状态机
+### 2.4 `decodeSseLine`：攒事件的状态机
 
 分工要分清：**`consumeLine` 把字符流切成行（语法层，只认换行符），`decodeSseLine` 把行攒成事件（语义层，认识 SSE 协议）**。
 
@@ -461,7 +276,7 @@ function decodeSseLine(line: string, state: SseDecoderState): ServerSentEvent | 
                             ↑ buffer 兜半行         ↑ state 兜半个事件
 ```
 
-### 3.5 边界与健壮性
+### 2.5 边界与健壮性
 
 **三种换行都要认**（`:385-412`）。`nextLineBreakIndex` 同时找 `\r` 和 `\n` 取较小者，`consumeLine` 里再补一句让 CRLF 算一个：
 
@@ -511,7 +326,7 @@ Anthropic 还会发 `ping` 保活事件，将来也可能新增类型。**白名
 
 ---
 
-## 第 4 章 T2 段：`AssistantMessage` 怎么攒出来
+## 第 3 章 T2 段：`AssistantMessage` 怎么攒出来
 
 `stream()` 函数里那台状态机**同时干两件事**：
 
@@ -520,7 +335,7 @@ Anthropic 的 6 种事件  ──►  ① 翻译成中立的 12 种事件（push
                        └──►  ② 往 output 这个对象上攒（拼出完整消息）
 ```
 
-### 4.0 先看骨架：一个循环，一个 `output`
+### 3.0 先看骨架：一个循环，一个 `output`
 
 后面几节会拆开讲各个分支，但**先要看清它们都长在同一个循环里**——否则容易把那些 `if (event.type === …)` 看成互不相干的片段：
 
@@ -559,7 +374,7 @@ export const stream = (model, context, options) => {
 
 三件事要记住：
 
-**① `output` 在循环外创建，只有一个。** 第 3 章那条流水线上，前面几层都是"一个接一个流过去"，到这里换成"一直在那儿、越蓄越满"：
+**① `output` 在循环外创建，只有一个。** 第 2 章那条流水线上，前面几层都是"一个接一个流过去"，到这里换成"一直在那儿、越蓄越满"：
 
 | 层 | 一次响应里有多少个 |
 | --- | --- |
@@ -568,7 +383,7 @@ export const stream = (model, context, options) => {
 | `RawMessageStreamEvent` | 几十上百 |
 | **`output`** | **1 个** |
 
-**前面是流水，`output` 是水池。** 这也解释了为什么 `partial: output` 每次都是同一个对象——它本来就只有一个（见 4.1）。
+**前面是流水，`output` 是水池。** 这也解释了为什么 `partial: output` 每次都是同一个对象——它本来就只有一个（见 3.1）。
 
 **② 每转一圈处理一个事件，同时干两件事**：改 `output`，并向下游 `push` 一个中立事件。
 
@@ -581,9 +396,9 @@ stream.push({ type: "text_delta", …, partial: output });        // ← 通知�
 
 注意对 `output` 的操作**有三种，不都是 push**：`content_block_start` 才 `output.content.push(block)`（数组多一格）、`content_block_delta` 是 `block.text += …`（往已有那格追加）、`message_start` / `message_delta` 是 `output.usage.x = …`（改顶层字段）。
 
-**③ 循环跑完，`output` 就完整了**，作为 `done` 事件的 `message` 发出去（去向见 4.9）。
+**③ 循环跑完，`output` 就完整了**，作为 `done` 事件的 `message` 发出去（去向见 3.9）。
 
-### 4.1 `partial` 不是拷贝
+### 3.1 `partial` 不是拷贝
 
 ```typescript
 stream.push({ type: "text_delta", contentIndex: index, delta: …, partial: output });
@@ -594,7 +409,7 @@ stream.push({ type: "text_delta", contentIndex: index, delta: …, partial: outp
 
 这是有意的：TUI 只需要 `render(e.partial)`，不关心自己是不是漏了几个事件。**代价是不能把 `partial` 存起来当历史快照用**——它会变。真要留存，得等 `done` 事件里的 `message`。
 
-### 4.2 事件对应关系
+### 3.2 事件对应关系
 
 | Anthropic | pi | 干的事 |
 | --- | --- | --- |
@@ -643,7 +458,7 @@ if (block && block.type === "text") {
 const blocks = output.content as Block[];    // :598  只是换个类型视角，不是复制
 ```
 
-### 4.3 两套 index 要对上
+### 3.3 两套 index 要对上
 
 ```typescript
 const index = blocks.findIndex((b) => b.index === event.index);
@@ -652,7 +467,7 @@ const index = blocks.findIndex((b) => b.index === event.index);
 
 为什么不直接用 `event.index`？因为那是 **Anthropic 的编号**，pi 不假设它与自己数组的下标一致。于是每个 block 上临时挂一个 `index` 字段记住"我在 Anthropic 那边是几号"，用时查一遍。**发给下游的 `contentIndex` 始终是 pi 自己数组的下标**——上层永远不必知道 provider 的编号规则。
 
-### 4.4 脚手架字段搭完就拆
+### 3.4 脚手架字段搭完就拆
 
 `Block` 这个类型很有意思（`:597`）：
 
@@ -676,7 +491,7 @@ delete (block as { partialJson?: string }).partialJson;
 
 **这条消息最后要落盘进会话历史**（第 7 章）——脚手架字段留着就会写进 `.jsonl`，污染数据、白占空间。
 
-### 4.5 工具参数边流边解析
+### 3.5 工具参数边流边解析
 
 ```typescript
 block.partialJson += event.delta.partial_json;
@@ -693,7 +508,7 @@ partialJson = '{"path":"A.md"}'     →  arguments = { path: "A.md" }
 
 `parseStreamingJson` 尽量解出目前已知的部分。**这样界面上能实时显示"正在读 A…"，而不是等参数全到齐才蹦出来。**
 
-### 4.6 Anthropic 到底会返回哪些类型
+### 3.6 Anthropic 到底会返回哪些类型
 
 三层，代码里都能查到。
 
@@ -721,7 +536,7 @@ partialJson = '{"path":"A.md"}'     →  arguments = { path: "A.md" }
 
 `signature_delta` 只往 `output` 上攒，不通知任何人（`:696-702`）——**签名是给 API 回传用的，界面上没什么可显示，发事件出去只会让下游多一次无意义重绘。**
 
-### 4.7 `redacted_thinking`：看不见但不能扔
+### 3.7 `redacted_thinking`：看不见但不能扔
 
 开了扩展思考后模型的推理过程会流回来，但偶尔安全系统会判定某段推理不宜明文返回，发回来的就是一坨加密数据。`types.ts:403-407` 的注释说全了：
 
@@ -743,7 +558,7 @@ const block: Block = {
 
 顺带：`thinkingSignature` 不是 redacted 专属，**普通思考块也带签名，同样要原样回传**。区别只是普通思考的签名是附属品，redacted 的签名**就是全部内容**。
 
-### 4.8 两个健壮性细节
+### 3.8 两个健壮性细节
 
 **usage 在 `message_start` 就记**（`:606`）。注释：*在 message_start 即记录初始用量，**确保流提前中止时仍保留输入令牌统计***。按 Esc 中断时输入 token 已经花掉，必须能算出账；等流结束才记就晚了。
 
@@ -759,7 +574,7 @@ if (event.usage.input_tokens != null) {
 
 还有一处很实在的注释（`:762`）：推理令牌位于 `output_tokens_details.thinking_tokens`，**当前 SDK 类型尚未声明该字段，因此用窄类型断言读取，字段结构已通过真实 API 验证**。官方 SDK 的类型定义落后于真实 API，pi 用窄断言绕过并注明验证来源——**将来 SDK 补上类型时，一眼能看出这段可以清理**。
 
-### 4.9 `output` 攒完之后去哪了
+### 3.9 `output` 攒完之后去哪了
 
 循环跑完（`:779`），`output` 就是一条完整的 `AssistantMessage`。它作为 `done` 事件的 `message` 字段发出去（`:792`）：
 
@@ -783,7 +598,7 @@ stream.end();
 }
 ```
 
-**这就是按 Esc 还能保留半截回复的原因**（第 1 章 1.2 那张表里的最后一条）。注意它先手动清了一遍脚手架字段：正常路径上这些是在 `content_block_stop` 里逐块删的（4.4），异常路径没走到那儿，得在这补一刀。
+**这就是按 Esc 还能保留半截回复的原因**（第 1 章 1.2 那张表里的最后一条）。注意它先手动清了一遍脚手架字段：正常路径上这些是在 `content_block_stop` 里逐块删的（3.4），异常路径没走到那儿，得在这补一刀。
 
 然后一路往上：
 
@@ -812,6 +627,193 @@ output 完整               :779 循环结束
 ```
 
 **从一个空对象开始，攒满，然后同时成为"下一轮的输入"和"磁盘上的一行"。** 圆就是在这里合上的——后面三章都是在讲这三条支路。
+
+---
+
+## 第 4 章 事件协议：模型吐字的切分规则
+
+> **这一章不是路径上的一站，是路旁的参照表。** 前两章跟着字节走完了 T1→T2，路上已经反复见到 `text_delta`、`toolcall_end`、`done` 这些名字冒出来；本章把它们系统地摆一遍——**先在路上遇见，再回头看全貌**。急着往下走可以跳过，需要时回查。
+
+模型回话不是一次性到达的，是一个字一个字流过来的。**事件协议就是把这个连续过程切成离散事件的规则**：会发出哪些事件、按什么顺序、每个带什么数据。
+
+`packages/ai/src/types.ts:572`：
+
+```typescript
+export type AssistantMessageEvent =
+	| { type: "start"; partial: AssistantMessage }
+	| { type: "text_start"; contentIndex: number; partial: AssistantMessage }
+	| { type: "text_delta"; contentIndex: number; delta: string; partial: AssistantMessage }
+	| { type: "text_end"; contentIndex: number; content: string; partial: AssistantMessage }
+	| { type: "thinking_start"; contentIndex: number; partial: AssistantMessage }
+	| { type: "thinking_delta"; contentIndex: number; delta: string; partial: AssistantMessage }
+	| { type: "thinking_end"; contentIndex: number; content: string; partial: AssistantMessage }
+	| { type: "toolcall_start"; contentIndex: number; partial: AssistantMessage }
+	| { type: "toolcall_delta"; contentIndex: number; delta: string; partial: AssistantMessage }
+	| { type: "toolcall_end"; contentIndex: number; toolCall: ToolCall; partial: AssistantMessage }
+	| { type: "done"; reason: Extract<StopReason, "stop" | "length" | "toolUse">; message: AssistantMessage }
+	| { type: "error"; reason: Extract<StopReason, "aborted" | "error">; error: AssistantMessage };
+```
+
+12 个事件，别被数量吓到——**规律是 3×3 + 3**：
+
+```text
+          start      delta      end
+text        ●          ●         ●
+thinking    ●          ●         ●
+toolcall    ●          ●         ●
+
+外加：start（整条消息开始）、done（成功终结）、error（失败终结）
+```
+
+三类内容，每类都是"开始 → 若干增量 → 结束"。**认识一类就认识全部。**
+
+它保证三件事：
+
+- **顺序**：`start` 一定最先，`done` 或 `error` 一定最后（源码注释：*Streams should emit `start` before partial updates, then terminate with either `done` … or `error` …*）；
+- **完整性**：`xxx_end` 携带这一块的完整内容，`done` 携带整条消息。**完全不管 delta、只等 end 和 done，照样拿到全部数据**——delta 是给"要实时显示"的人用的（TUI 的打字机效果），`-p` 一次性模式直接等 `done` 即可；
+- **有且只有一个终结事件**：不会两个都来，也不会一个都不来。
+
+### 4.1 `partial`：每个事件都带一份完整快照
+
+```typescript
+| { type: "text_delta"; contentIndex: number; delta: string; partial: AssistantMessage }
+//                                            ↑ 这次新增的     ↑ 到目前为止的完整状态
+```
+
+**不是只给增量，而是"增量 + 当前完整快照"一起给。** 好处是消费者不必自己攒状态：
+
+```typescript
+// ❌ 只给 delta，消费者被迫维护状态，还得担心漏事件、乱序
+let text = "";
+on("text_delta", (e) => { text += e.delta; render(text); });
+
+// ✅ 给 partial，消费者完全无状态
+on("text_delta", (e) => render(e.partial));
+```
+
+TUI 收到任何一个事件，直接拿 `partial` 重画即可。
+
+**这个模式在 pi 里是一以贯之的**：写扩展工具时 `execute` 收到的 `onUpdate` 回调，约定同样是"每次传一份完整的半成品结果"，而非只传增量。看似浪费，实则把"状态一致性"这件麻烦事从每个消费者身上收归到生产者一处。
+
+### 4.2 `contentIndex`：`content` 数组的下标
+
+一条 assistant 消息的 `content` 是数组（`types.ts:463`）：
+
+```typescript
+content: (TextContent | ThinkingContent | ToolCall)[];
+//   下标   0             1                2
+```
+
+`contentIndex: 2` 就是"这个事件属于 `content[2]`"。**只有一个编号系统**——三种类型共用同一串连续下标，不各数各的：
+
+```text
+content[0]  thinking     contentIndex 0
+content[1]  text         contentIndex 1
+content[2]  toolCall     contentIndex 2
+content[3]  toolCall     contentIndex 3
+```
+
+第 2 块是 toolCall，编号就是 2，不会因为"这是第 0 个 toolCall"而变成 0。
+
+**分块的依据是类型切换，不是句子边界。** 模型连说十句话中间没干别的，那也只有 1 块——`text_start` → 几十个 `delta` → `text_end`，`contentIndex` 全程是 0。顺序也不固定，`text → toolCall → text → toolCall` 完全合法。**`contentIndex` 只表示"在数组的第几格"，不表示类型顺序。**
+
+它最要紧的用途是**给交错到达的增量归位**：
+
+```text
+toolcall_delta  contentIndex 2   delta '{"pa'
+toolcall_delta  contentIndex 3   delta '{"pat'
+toolcall_delta  contentIndex 2   delta 'th":"AGENTS'      ← 接回第 2 块
+toolcall_delta  contentIndex 4   delta '{"path"'
+```
+
+三个工具调用的参数 JSON 同时在流，没有 index 就全糊成一团。**这与工具执行时用 `toolCallId` 把界面更新分派到对应组件，是同一个问题的同一种解法：并发的多路更新，靠一个 key 各归各位。**
+
+### 4.3 三种内容类型：为什么 `toolCall` 不能塞进 `text`
+
+一个自然的疑问：工具调用不就是模型输出的一段文本吗，为什么要单列一种类型？看结构就明白了。
+
+```typescript
+// types.ts:417
+export interface ToolCall {
+	type: "toolCall";
+	id: string;                       // ← 身份证
+	name: string;                     // ← 调哪个
+	arguments: Record<string, any>;   // ← 已解析好的对象
+}
+
+// types.ts:391
+export interface TextContent {
+	type: "text";
+	text: string;                     // ← 就一坨字符串
+}
+```
+
+**放进 `text` 的话，这三个字段就得自己从字符串里抠出来。** 早期（ReAct 那一代）确实这么干过——让模型输出 `Action: read` / `Action Input: {…}` 再用正则解析。三个问题：
+
+- **分不清"提及"和"执行"**：模型说"你可以用 read 工具读这个文件"，正则一匹配工具就跑了。类型分开之后，**说 read 是文本，调 read 是 toolCall**，语义彻底隔开；
+- **格式随时会歪**：少个引号、JSON 写成单引号，解析就炸。现在 provider 侧有受限采样兜底（`packages/ai/src/api/constrained-sampling.ts`），从生成阶段就保证 JSON 合法；
+- **没有 id，结果配不回去**——这是最硬的理由。
+
+模型一次可发起多个工具调用，结果回来时靠 `id` 认领：
+
+```text
+assistant:   toolCall { id: "c1", name: "read", … }
+             toolCall { id: "c2", name: "read", … }
+             toolCall { id: "c3", name: "bash", … }
+
+toolResult:  { toolCallId: "c2", … }    ← 靠 id 认领，
+toolResult:  { toolCallId: "c1", … }      顺序可以是乱的
+toolResult:  { toolCallId: "c3", … }
+```
+
+到 Anthropic 报文里就是 `tool_use_id` ↔ `tool_use.id` 配对（`anthropic-messages.ts:1155` 的 `convertToolResult`）。**纯文本没地方挂这个 id**——要么自己发明一套编号约定，要么只能串行调用，三个文件三个来回，慢三倍。
+
+`ThinkingContent` 同理（`types.ts:398`），它带着 `thinkingSignature`（provider 返回的不透明推理标识，下一轮要原样回传才能维持推理连续性）和 `redacted`（是否被安全过滤器遮蔽）。**混进 `text` 里这些字段就没地方放了。**
+
+**结论：分成三种类型，是因为它们各自带着不同的结构化元数据，而这些元数据都有硬用途（配对、回传、执行）。挤进一个 `text: string` 就全丢了。**
+
+### 4.4 `done` / `error`：用类型收窄堵死非法组合
+
+```typescript
+| { type: "done";  reason: Extract<StopReason, "stop" | "length" | "toolUse">; message: AssistantMessage }
+| { type: "error"; reason: Extract<StopReason, "aborted" | "error">;           error: AssistantMessage };
+```
+
+`StopReason` 全集有 6 个（`types.ts:453`）：
+
+```typescript
+export type StopReason = "pending" | "stop" | "length" | "toolUse" | "error" | "aborted";
+```
+
+`Extract<T, U>` 是 TypeScript 内置工具类型，**从联合类型 T 里只挑出属于 U 的成员**。于是：
+
+- `done` 的 reason **只可能**是 `stop` / `length` / `toolUse`；
+- `error` 的 reason **只可能**是 `aborted` / `error`；
+- `pending` 一个都不在里面——它是"还没结束"的中间态，不可能出现在终结事件上。
+
+**写一个 `{ type: "done", reason: "aborted" }` 会当场编译报错。** "成功不可能带失败原因"这条协议规则，不靠注释、不靠运行时检查，靠类型定义堵死。
+
+### 4.5 `reason` 其实是在说"接下来谁动"
+
+| reason | 含义 | agent 接下来 |
+| --- | --- | --- |
+| `toolUse` | 模型要调工具 | **执行工具 → 再问一轮**（回到 T3） |
+| `stop` | 模型说完了 | 停，控制权交回用户 |
+| `length` | 撞到 `max_tokens` 上限 | 停；且本轮所有工具调用一律判失败（1.1 ②） |
+| `aborted` | 用户中断 | 停，保留已收到的部分 |
+| `error` | 出错 | 停（`agent-loop.ts:209` 直接 `turn_end` + `agent_end` 返回） |
+
+**`toolUse` 就是那个"再来一轮"的信号**，`agent-loop.ts:180` 那个 `while (true)` 转不转，全看它。所以一次完整的用户交互可能是：
+
+```text
+用户提问
+  → assistant① (toolUse)  → 执行工具 → toolResult
+  → assistant② (toolUse)  → 执行工具 → toolResult
+  → assistant③ (toolUse)  → 执行工具 → toolResult
+  → assistant④ (stop)     → 结束，等用户
+```
+
+四条 assistant 消息、四次 HTTP 请求。**界面上的"一次回答"，底下是十几个来回。**
 
 ---
 
@@ -879,7 +881,7 @@ emitToolResultMessage(toolResultMessage, emit);                       // 结果�
 
 **`tool_execution_start` 是在 `prepareToolCall` 之前发的**——所以即使工具名不存在、参数校验失败，界面上也会先出现这个工具块，再立刻变成错误状态。这解释了一个观察得到的现象：`tool_execution_start` 比扩展的 `tool_call` 钩子还早。
 
-中间那个 `tool_execution_update` 就是工具 `onUpdate` 回调的出口——**与第 4 章 `partial` 同一个模式：每次上报一份完整的半成品快照，消费者无需自己攒状态。**
+中间那个 `tool_execution_update` 就是工具 `onUpdate` 回调的出口——**与 3.1 的 `partial` 同一个模式：每次上报一份完整的半成品快照，消费者无需自己攒状态。**
 
 ### 5.5 `terminate`：工具可以叫停整个循环
 
@@ -898,6 +900,61 @@ hasMoreToolCalls = !executedToolBatch.terminate;
 ---
 
 ## 第 6 章 T4–T5 段：循环怎么转
+
+### 6.0 镜头拉远：前面几章都发生在一圈之内
+
+到这里要换个视角。前面几章是**贴着一圈走**——请求怎么发、字节怎么变消息、工具怎么执行；本章要说的是：**你刚看完的那一整套，是循环体里的一圈；它凭什么转第二圈、什么时候停。**
+
+所以循环不是这一章才冒出来的新东西，**它从 T0 就在了**。实际是三层嵌套：
+
+```text
+runAgentLoop(…)                                      agent-loop.ts
+  │
+  └─ while (true) {                                  // :180  ← 本章的外层
+       │
+       └─ while (hasMoreToolCalls || pending…) {     // :185  ← 本章的内层
+            │
+            ├─ 注入 pendingMessages                   // :195
+            │
+            ├─ streamAssistantResponse(…)             // :206
+            │    │
+            │    ├─ transformContext / convertToLlm   ← 第 9 篇第 9 章
+            │    ├─ 组装 Context，发 HTTP             ← T0
+            │    └─ stream(…)                         ← anthropic-messages.ts:514
+            │         │
+            │         └─ for await (const event of iterateAnthropicEvents(…)) {
+            │              …                          ← 第 2、3 章讲的就是这个循环
+            │            }                            ← T1、T2
+            │
+            ├─ executeToolCalls(…)                    // :230  ← 第 5 章，T3
+            ├─ 结果 push 进 currentContext.messages    // :235  ← T4
+            └─（回到内层顶部，发下一个请求）            ← T5
+          }
+     }
+```
+
+**第 2、3 章那个 `for await` 是最内层**，它转几十上百圈才产出**一条** assistant 消息——而那只是内层 while 一圈里的一小段。对回第 1 章的时间线：
+
+```text
+T0 ─┬─ 内层 while 第 1 圈开始
+T1  │    └─ for await 转几十上百圈（每圈一个 SSE 事件）
+T2  │    └─ for await 结束，output 完整
+T3  │  executeToolCalls
+T4  │  结果入 context
+T5 ─┴─ 内层 while 第 2 圈开始  ← 就是"回到顶部"
+T6     （落盘散落在 T2 和 T4，由 message_end 触发，见第 7 章）
+```
+
+**第 1 章那条时间线，画的就是内层 while 的一圈半。**
+
+循环是这样被进入的：
+
+```text
+用户敲回车 → AgentSession.prompt(消息) → Agent.prompt() → runAgentLoop(context, config, …)
+   → while (true) → while (hasMoreToolCalls = true) → 第一次 streamAssistantResponse
+```
+
+`hasMoreToolCalls` 初值是 `true`（`:181`），**就是为了让内层 while 无条件跑第一圈**——否则第一个请求都发不出去。
 
 ### 6.1 两层循环，不是一层
 
@@ -923,7 +980,7 @@ while (true) {                                              // :180 外层
 | **内层** | 工具调用来回 | 模型还要调工具、或有插话消息 |
 | **外层** | 收工之后的回心转意 | agent 本来要停了，但用户又发了消息 |
 
-`hasMoreToolCalls` 初值是 `true`（`:181`），所以**内层至少跑一次**——否则第一个请求都发不出去。
+**两层的分界是"agent 认为自己该收工了"**：内层退出 = 模型不再要工具、也没有插话；外层这才有机会问一句"还有后续消息吗"。
 
 ### 6.2 内层一圈的顺序
 
@@ -1074,9 +1131,9 @@ if (event.message.role === "assistant") {
               ▲                                                ▼
               │                                           SSE 字节流
         appendMessage                                          │
-              ▲                                      事件协议（第 2–3 章）
+              ▲                                      SSE 解析（第 2 章）
               │                                                │
-        message_end ◄── agent-loop ◄── AssistantMessage ◄── 状态机（第 4 章）
+        message_end ◄── agent-loop ◄── AssistantMessage ◄── 状态机（第 3 章）
               │              │
               │              └──► 工具执行（第 5 章）──► toolResult ──┐
               │                                                       │
@@ -1102,20 +1159,20 @@ if (event.message.role === "assistant") {
 
 本篇涉及的可迁移设计模式：
 
-1. **两级缓冲对付流式切分**：`buffer` 兜半行、`TextDecoder` 的 `stream: true` 兜半个字符。**凡是从流里切结构，都要问"切在中间怎么办"**（3.3）。
-2. **小函数 + 循环重复**：`consumeLine` 一次切一行、`decodeSseLine` 一次吃一行，复杂度交给外面的 while。**每个函数小到一眼能验对错**（3.4）。
+1. **两级缓冲对付流式切分**：`buffer` 兜半行、`TextDecoder` 的 `stream: true` 兜半个字符。**凡是从流里切结构，都要问"切在中间怎么办"**（2.3）。
+2. **小函数 + 循环重复**：`consumeLine` 一次切一行、`decodeSseLine` 一次吃一行，复杂度交给外面的 while。**每个函数小到一眼能验对错**（2.4）。
 3. **状态外置**：`decodeSseLine` 本身无记忆，`state` 由调用方持有。好测（给一行、给一个 state，检查 state）、好复位（换个空 state 就重新开始）。
-4. **白名单而非黑名单**：只认六种 SSE 事件，其余跳过。**新增事件不会把老客户端搞崩**（3.5）。
-5. **协议层的配对检查**：`sawMessageStart && !sawMessageEnd`。HTTP 层的"正常结束"不等于协议层的完整——**传输成功不代表内容完整**（3.5）。
-6. **报错要带原始输入**：`raw: string[]` 平时无用，只在解析失败时救命。**调试流式协议时，"解析失败"四个字毫无价值**（3.5）。
-7. **推送完整快照而非纯增量**：`partial` / `onUpdate(snapshot)` 同一模式。**把"状态一致性"从每个消费者身上收归到生产者一处**（4.1、5.4）。
-8. **脚手架字段搭完就拆**：`index` / `partialJson` 用完 `delete`，因为这条消息要落盘（4.4）。**临时字段和持久化数据共用一个对象时，必须显式清理。**
-9. **方言在边界层吃掉**：`redacted_thinking` 折进 `thinking` + `redacted` 标记，provider 编号换算成自己的 `contentIndex`。**上层永远不该知道下层的方言**（4.3、4.7）。
-10. **不透明数据原样转手**：`thinkingSignature` 读不懂也不能扔，下轮要回传（4.7）。**"我看不懂"不等于"可以丢"。**
+4. **白名单而非黑名单**：只认六种 SSE 事件，其余跳过。**新增事件不会把老客户端搞崩**（2.5）。
+5. **协议层的配对检查**：`sawMessageStart && !sawMessageEnd`。HTTP 层的"正常结束"不等于协议层的完整——**传输成功不代表内容完整**（2.5）。
+6. **报错要带原始输入**：`raw: string[]` 平时无用，只在解析失败时救命。**调试流式协议时，"解析失败"四个字毫无价值**（2.5）。
+7. **推送完整快照而非纯增量**：`partial` / `onUpdate(snapshot)` 同一模式。**把"状态一致性"从每个消费者身上收归到生产者一处**（3.1、5.4）。
+8. **脚手架字段搭完就拆**：`index` / `partialJson` 用完 `delete`，因为这条消息要落盘（3.4）。**临时字段和持久化数据共用一个对象时，必须显式清理。**
+9. **方言在边界层吃掉**：`redacted_thinking` 折进 `thinking` + `redacted` 标记，provider 编号换算成自己的 `contentIndex`。**上层永远不该知道下层的方言**（3.3、3.7）。
+10. **不透明数据原样转手**：`thinkingSignature` 读不懂也不能扔，下轮要回传（3.7）。**"我看不懂"不等于"可以丢"。**
 11. **一个拖累全部的降级策略**：一个 sequential 工具让整批退化成串行（5.1）。**并发安全上，保守是唯一正确的默认。**
 12. **并发执行、确定性排序**：`Promise.all` 保证结果顺序等于输入顺序，与完成先后无关（5.2）。**上下文必须可重放，不能受网络快慢影响。**
-13. **异常路径也要计量**：`usage` 在 `message_start` 就记，中断了也能算账（4.8）。
-14. **"非空才覆盖"的防御式合并**：避免上游省略字段时把已有数据冲掉（4.8）。
+13. **异常路径也要计量**：`usage` 在 `message_start` 就记，中断了也能算账（3.8）。
+14. **"非空才覆盖"的防御式合并**：避免上游省略字段时把已有数据冲掉（3.8）。
 15. **钩子放在状态切换的缝隙**：`prepareNextTurn` 落在"工具结果已入上下文、下个请求未发出"之间，压缩才有机会整个替换 context（6.5）。
 
 ---
