@@ -1060,9 +1060,36 @@ if (nextTurnSnapshot) {
 }
 ```
 
-**`currentContext` 整个可以被替换——这就是压缩的插入点。** 上一轮结束后发现 token 快满，压缩一次，把新的（短得多的）context 交回来，下一轮就用新的发请求。coding-agent 在 `agent-session.ts:584` 接管了这个钩子。
+**`currentContext` 整个可以被替换。** 时间线上它落在 **T4 和 T5 之间**：工具结果已进上下文，下一个请求还没发出去。coding-agent 在 `agent-session.ts:584`（`_installAgentNextTurnRefresh`）接管了这个钩子。
 
-时间线上它落在 **T4 和 T5 之间**：工具结果已进上下文，下一个请求还没发出去。第 8 篇学的自动压缩（`shouldCompact`）就是从这里被触发的。
+⚠️ **更正（2026-08-19）**：本节原先写「这就是压缩的插入点……自动压缩就是从这里触发的」，**这是错的**。核对后：
+
+```typescript
+// coding-agent 挂的那个（_installAgentNextTurnRefresh :584）只刷四样
+context: { ...previousContext, systemPrompt: …, tools: … },
+model: …, thinkingLevel: …,
+// harness 的那个（agent-harness.ts:541）是刷盘 + 重建状态
+// 两处都没有任何压缩逻辑
+```
+
+**自动压缩不在 agent 循环内，而在循环【之外】的会话层**——`_handlePostAgentRun` → `_checkCompaction` → `_runAutoCompaction`（`agent-session.ts:1220`）。本篇 7.3 节写的「留到 `agent_end` 时判断」才是对的。
+
+放在循环外有三个理由：
+
+1. **压缩自己要发一次 LLM 请求。** 放在循环内就成了请求套请求，中断、计费、事件顺序都会乱。
+2. **压缩要改会话树。** 而循环内的 `currentContext` 是一路带着走的同一个数组（6.6），不从树重建；必须让循环停下、改完树、再 `agent.continue()` 重开一轮，第 9 篇那条组装链才会重跑，短上下文才生效。
+3. **溢出会自己终止循环**（`:209` 遇 `error`/`aborted` 直接 `return`），控制权必然回到会话层——压缩只要守住出口，不必在循环内蹲守。
+
+于是循环层次比本章画的多一层（详见第 12 篇 5.6.1）：
+
+```text
+_runAgentPrompt 的 while          ← 会话层：重试 / 压缩 / 扩展补刀
+  └─ agent-loop 的 while(true)    ← 本章 6.1
+       └─ 内层 while              ← 工具轮次
+            └─ for await          ← SSE 事件
+```
+
+**压缩发生在「一个用户回合内、两次 agent run 之间」的缝隙里**，不是「两个 turn 之间」。
 
 ### 6.6 上下文是一路带着走的同一个数组
 
@@ -1184,7 +1211,9 @@ if (event.message.role === "assistant") {
 12. **并发执行、确定性排序**：`Promise.all` 保证结果顺序等于输入顺序，与完成先后无关（5.2）。**上下文必须可重放，不能受网络快慢影响。**
 13. **异常路径也要计量**：`usage` 在 `message_start` 就记，中断了也能算账（3.8）。
 14. **"非空才覆盖"的防御式合并**：避免上游省略字段时把已有数据冲掉（3.8）。
-15. **钩子放在状态切换的缝隙**：`prepareNextTurn` 落在"工具结果已入上下文、下个请求未发出"之间，压缩才有机会整个替换 context（6.5）。
+15. **钩子放在状态切换的缝隙**：`prepareNextTurn` 落在"工具结果已入上下文、下个请求未发出"之间，所以能整个替换 context——coding-agent 用它每轮刷新 `systemPrompt` / `tools` / `model`（6.5，详见第 12 篇 6.1）。
+16. **要改历史的操作放在循环之外**：压缩自己要发请求、要改会话树，而循环内的 `currentContext` 不从树重建；所以它在会话层的 `_handlePostAgentRun` 里做，靠 `agent.continue()` 重开一轮让新上下文生效（6.5 更正、7.3）。
+17. **让失败自己交还控制权**：溢出使本轮 `stopReason === "error"`，循环当场 `return`（`:209`），控制权必然回到会话层——守住出口即可，无需在循环内蹲守（6.5 更正）。
 
 ---
 
@@ -1206,14 +1235,15 @@ if (event.message.role === "assistant") {
 12. `redacted_thinking` 为什么折进 `thinking` 而不新建第四种内容类型？它的 `thinkingSignature` 和普通思考的有何不同？
 13. 一批工具里有一个标了 `sequential`，其余会怎样？为什么这么设计？
 14. 并行执行时，`toolResult` 消息的顺序由什么决定？为什么不能用完成顺序？
-15. agent-loop 为什么是两层循环？各自的退出条件是什么？
+15. agent-loop 为什么是两层循环？各自的退出条件是什么？它外面还有一层循环吗？
 16. steering message 和 follow-up message 的区别是什么？插话为什么不会打断当前这一轮？
-17. 自动压缩挂在哪个钩子上？它在时间线的哪两个点之间执行？为什么必须在那里？
-18. 落盘的触发事件是什么？哪三种消息类型不走这条路，为什么？
-19. `appendMessage` 与 `appendCustomMessageEntry` 的存储形态有何不同？这与第 9 篇的"剥离 vs 重建"是什么关系？
-20. 一次响应里，行、`ServerSentEvent`、`RawMessageStreamEvent`、`output` 各有多少个？为什么 `output` 是特殊的那一个？
-21. `output` 攒完之后分几路、各去了哪？中断时它还会被发出去吗？
-22. 把第 9 篇和本篇接起来，说出"上下文为什么会涨"的完整因果链。
+17. 自动压缩在哪一层执行？为什么**不能**放在 `prepareNextTurn` 那个缝隙里？（三条理由）
+18. 一次 agent run 跑到中途上下文才打满，会发生什么？为什么压缩机制不需要在循环内蹲守？
+19. 落盘的触发事件是什么？哪三种消息类型不走这条路，为什么？
+20. `appendMessage` 与 `appendCustomMessageEntry` 的存储形态有何不同？这与第 9 篇的"剥离 vs 重建"是什么关系？
+21. 一次响应里，行、`ServerSentEvent`、`RawMessageStreamEvent`、`output` 各有多少个？为什么 `output` 是特殊的那一个？
+22. `output` 攒完之后分几路、各去了哪？中断时它还会被发出去吗？
+23. 把第 9 篇和本篇接起来，说出"上下文为什么会涨"的完整因果链。
 
 ---
 
