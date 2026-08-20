@@ -16,14 +16,14 @@
 >
 > 所有 `文件:行号` 基于 commit `859bd29bd`。核心文件三个：`core/agent-session.ts`（触发与编排）、`core/compaction/compaction.ts`（切点与生成）、`core/compaction/utils.ts`（文件操作与序列化）。
 >
-> ⬜ **本篇尚未覆盖**：`generateSummaryWithUsage` 内部（摘要提示词、`reserveTokens` → `maxTokens`、重试接入）、消息序列化的 `TOOL_RESULT_MAX_CHARS` 截断、手动 `/compact` 的 `customInstructions` 路径、`branch-summarization.ts`。
+> ⬜ **本篇尚未覆盖**：手动 `/compact` 的完整路径（`customInstructions` 在 4.7 提过，但入口与交互未跟）、`branch-summarization.ts`（431 行，与压缩共用基础设施）。
 
 ## 目录
 
 - 第 1 章 全景：压缩到底在哪一层发生
 - 第 2 章 触发段：什么时候压
 - 第 3 章 编排段：`_runAutoCompaction` 七步
-- 第 4 章 生成段：`compact()` 是个调度器
+- 第 4 章 生成段：从消息到一段摘要
 - 第 5 章 旁路：文件操作追踪
 - 第 6 章 生效段：压完怎么让新上下文起作用
 - 第 7 章 工程模式清单
@@ -520,9 +520,11 @@ if (this._autoCompactionAbortController.signal.aborted) {
 
 ---
 
-## 第 4 章 生成段：`compact()` 是个调度器
+## 第 4 章 生成段：从消息到一段摘要
 
-`compaction.ts:849`。它本身几乎没有逻辑，只决定**发几次请求、怎么拼结果**。
+本章分两半：4.1–4.5 讲 `compact()` 这个**调度器**（发几次请求、覆盖哪些消息）；4.6–4.11 讲 `generateSummaryWithUsage` 这个**执行者**（摘要长什么样、请求怎么造）。
+
+`compact()`（`compaction.ts:849`）本身几乎没有逻辑，只决定**发几次请求、怎么拼结果**。
 
 ```text
 preparation 解构出 8 个字段
@@ -697,6 +699,314 @@ if (!firstKeptEntryId) {
 08 篇学过"存 id，算 index"——`firstKeptEntryId` 是要持久化的 uuid。老会话文件可能没有，这里**直接抛错要求迁移，而不是编一个**。
 
 但它抛在**所有请求都发完之后**——摘要白生成了。**判断**：放在函数开头更省钱，现有位置是可改进点。
+
+### 4.6 摘要长什么样：一个七段模板
+
+前面几节讲的都是"发几次请求、覆盖哪些消息"。但要看懂 `generateSummaryWithUsage`（`compaction.ts:642`）里那些参数为什么长那样，得先看**产物**——**摘要不是"随便总结一下"，而是往一个固定模板里填**。
+
+`SUMMARIZATION_PROMPT`（`compaction.ts:486`）要求 `Use this EXACT format`：
+
+```markdown
+## Goal
+[用户想达成什么？会话涉及多个任务时可以多条]
+
+## Constraints & Preferences
+- [用户提过的约束、偏好、要求]
+- [或者 "(none)"]
+
+## Progress
+### Done
+- [x] [已完成的任务/改动]
+### In Progress
+- [ ] [正在做的]
+### Blocked
+- [卡住的问题]
+
+## Key Decisions
+- **[决策]**: [简要理由]
+
+## Next Steps
+1. [接下来该做什么，有序]
+
+## Critical Context
+- [继续工作所需的数据、示例、引用]
+```
+
+末尾一句是硬约束：
+
+> Keep each section concise. **Preserve exact file paths, function names, and error messages.**
+
+摘要的定位写在提示词第一句：
+
+> Create a structured context checkpoint summary that **another LLM will use to continue the work**.
+
+**不是给人看的会议纪要，是给另一个模型的交接文档。** 所以要有 `Next Steps`、要保留精确路径和函数名——那是"接着干"必需的，不是"读懂"必需的。
+
+**这也解释了第 5 章那条旁路为什么还要存在**：提示词虽然要求"保留精确路径"，但那只是**对模型的请求**，不是保证。文件清单是**代码保证**的那一份，不依赖模型听话。
+
+有了模板，`maxTokens` 那行也就好懂了：
+
+```typescript
+const maxTokens = Math.min(
+	Math.floor(0.8 * reserveTokens),                                    // 16384 × 0.8 = 13107
+	model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY,
+);
+```
+
+> 摘要输出上限取 `reserveTokens` 的 **80%** 与模型 `maxTokens` 的较小值，**给调用协议和后续上下文留出余量**。
+
+**13k token 要装下这七段**，所以提示词里反复说 `Keep each section concise`。留 20% 是因为 `reserveTokens` 本是"给下一次回答留的空间"，摘要占掉一部分后，模型还得有地方回答用户的问题。
+
+`model.maxTokens > 0 ? … : Infinity` 是防御：有些模型配置里没填 `maxTokens`（为 0），不能拿 0 当上限。
+
+对比之下，轮前缀摘要（4.3）用的是**第三套提示词**：
+
+```typescript
+// compaction.ts:826
+const TURN_PREFIX_SUMMARIZATION_PROMPT = `This is the PREFIX of a turn that was too large to keep. The SUFFIX (recent work) is retained. …`;
+```
+
+**它不填七段模板**，只需交代"这一轮前半截发生了什么"——所以预算是一半。
+
+### 4.7 两套提示词：同一模板的两种模式
+
+```typescript
+let basePrompt = previousSummary ? UPDATE_SUMMARIZATION_PROMPT : SUMMARIZATION_PROMPT;
+if (customInstructions) {
+	basePrompt = `${basePrompt}\n\nAdditional focus: ${customInstructions}`;
+}
+```
+
+> 有旧摘要时执行**增量合并**，确保多次压缩不会遗失更早阶段的目标、约束与决策。
+
+**两套提示词的七个标题一模一样，只是每段下的指示不同：**
+
+| 段落 | 首次版 | 增量版 |
+|---|---|---|
+| Goal | `[用户想达成什么]` | `[保留已有目标，任务扩展了就加新的]` |
+| Progress / Done | `[x] [已完成的]` | `[x] [包含之前已完成的 AND 新完成的]` |
+| Progress / In Progress | `[ ] [正在做的]` | `[ ] [根据进展更新]` |
+| Blocked | `[卡住的问题]` | `[当前的阻塞——已解决的要删掉]` |
+| Key Decisions | `**[决策]**: [理由]` | `**[决策]**: [理由] (保留全部旧的，加新的)` |
+
+增量版开头还多五条规则：`PRESERVE` 旧摘要全部信息 / `ADD` 新进展与决策 / `UPDATE` 完成项从 In Progress 挪到 Done / `UPDATE` Next Steps / 不再相关的可删。
+
+**"增量"的实质是让模型做一次结构化 merge，而不是重新总结。**
+
+#### 为什么必须换提示词，不能只是把旧摘要塞进去
+
+假设只塞不换，用首次版的提示词，输入是 `<conversation>新 50 条</conversation>` + `<previous-summary>旧摘要</previous-summary>`，而开场白仍是：
+
+> The messages above are a conversation to summarize.
+
+模型会理解成"**上面是一段对话，总结它**"——去总结那 50 条新消息，把 `<previous-summary>` 当成对话的一部分或干脆忽略。**结果是旧信息丢失。**
+
+增量版的开场白重新定义了角色：
+
+> The messages above are **NEW** conversation messages to incorporate into the existing summary provided in `<previous-summary>` tags.
+
+```text
+首次版：  对话 ──► 摘要
+增量版：  旧摘要 + 新对话 ──► 新摘要
+             ↑ 主体      ↑ 增量
+```
+
+**4.1 说的 `previousSummary` 接力，代码只负责把旧摘要传过来；真正保证"信息不丢"的是这套提示词。**
+
+`customInstructions` 是**追加而非替换**——手动 `/compact 重点关注数据库部分` 会在提示词末尾加一行 `Additional focus: 重点关注数据库部分`。
+
+### 4.8 `serializeConversation`：一举解决两个问题
+
+`generateSummaryWithUsage` 里这两行看着平平无奇：
+
+```typescript
+const llmMessages = convertToLlm(currentMessages);            // 先归一化（09 篇那个投影函数）
+const conversationText = serializeConversation(llmMessages);  // 再拍平成文本
+```
+
+但 `serializeConversation`（`utils.ts:125`）同时解决了两个**互不相干**的问题。
+
+#### 问题一：防止模型接着聊
+
+> This prevents the model from treating it as a conversation to continue.
+
+结构化的 `messages` 数组被拍成一段带前缀标签的**纯文本**：
+
+```text
+[User]: 帮我重构认证模块
+[Assistant thinking]: 先看看现有结构…
+[Assistant]: 好的，我先读一下相关文件
+[Assistant tool calls]: read(path="src/auth.ts"); read(path="src/token.ts")
+[Tool result]: export class Auth { … }
+[Assistant]: 我看到 TokenValidator 和 Auth 耦合了…
+```
+
+**这就不是对话了，是对话的转录稿。** 模型没有"轮到我了"的信号可循。
+
+若把那 50 条消息原样当作 `messages` 发过去，最后一条可能是 `user` 或 `toolResult`——那正是"该你说话了"的信号，模型会接着往下干活。
+
+这与另外两处构成**同一目的的三道防线**：
+
+```text
+① serializeConversation      拍平成转录稿              ← 形式上不像对话
+② 装进一条 user 消息          整段包进 <conversation>   ← 结构上是"材料"
+③ SUMMARIZATION_SYSTEM_PROMPT  Do NOT continue…        ← 指令上明令禁止
+```
+
+系统提示词（`utils.ts:174`）三句话堵同一个洞：
+
+```typescript
+export const SUMMARIZATION_SYSTEM_PROMPT = `You are a context summarization assistant. …
+
+Do NOT continue the conversation. Do NOT respond to any questions in the conversation. ONLY output the structured summary.`;
+```
+
+**三道都做，因为这个失败模式代价大**：模型不输出摘要而接着干活，压缩彻底失败，且要到解析结果时才发现。
+
+#### 问题二：摘要请求自身不能爆
+
+这里有个自指的难题：
+
+```text
+要摘要的这批消息，本身就是因为【太大】才要被压缩的
+                ↓
+原样塞进摘要请求 → 摘要请求自己就爆了
+```
+
+解法是**工具结果截断**：
+
+```typescript
+const TOOL_RESULT_MAX_CHARS = 2000;
+
+function truncateForSummary(text: string, maxChars: number): string {
+	if (text.length <= maxChars) return text;
+	const truncatedChars = text.length - maxChars;
+	return `${text.slice(0, maxChars)}\n\n[... ${truncatedChars} more characters truncated]`;
+}
+// …
+} else if (msg.role === "toolResult") {
+	parts.push(`[Tool result]: ${truncateForSummary(content, TOOL_RESULT_MAX_CHARS)}`);
+}
+```
+
+> 工具结果会被截断，以便将摘要请求控制在合理的 token 预算内。**生成摘要不需要工具结果的完整内容。**
+
+**为什么单挑工具结果开刀**：它是上下文膨胀的主要来源——一次 `read` 可能返回几万字符，而 `[User]`/`[Assistant]` 通常几百字。
+
+**为什么截断不伤质量**：摘要要记的是"读了 auth.ts、发现耦合、决定提取 TokenValidator"，**不是文件内容本身**。前 2000 字符足够判断"这次调用干了什么、结果是什么性质"。
+
+`[... N more characters truncated]` 这个标记也必要——**告诉模型此处被截过**，免得它以为文件就这么长、据此做出错误结论。
+
+工具调用参数则被压成一行，且**不截断**：
+
+```typescript
+const argsStr = Object.entries(args).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(", ");
+toolCalls.push(`${block.name}(${argsStr})`);
+// →  [Assistant tool calls]: read(path="src/auth.ts"); grep(pattern="TokenValidator")
+```
+
+因为参数短，而且**正是摘要最需要精确保留的东西**（模板里那句 `Preserve exact file paths, function names`）。
+
+#### 取舍梯度：判据不是长度，是"对接着干有多重要"
+
+| 内容 | 处理 | 理由 |
+|---|---|---|
+| 工具**参数** | 完整保留 | 短，且是"做了什么"的精确记录 |
+| 用户/助手**文本** | 完整保留 | 短，且是意图与决策所在 |
+| **thinking** | 完整保留 | 决策理由在这里 |
+| 工具**结果** | 截到 2000 字符 | 长，且摘要不需要内容本身 |
+
+工具结果最长、也恰好最不需要——这不是巧合：**工具结果本来就是"原始数据"，而摘要要的是"结论"。**
+
+#### `thinking` 为什么单独一行
+
+```typescript
+if (thinkingParts.length > 0) parts.push(`[Assistant thinking]: ${thinkingParts.join("\n")}`);
+if (msg.content.some((b) => b.type === "text")) parts.push(`[Assistant]: ${contentText(msg.content)}`);
+if (toolCalls.length > 0) parts.push(`[Assistant tool calls]: ${toolCalls.join("; ")}`);
+```
+
+**一条 assistant 消息可能拆成三行输出。** 保留 thinking 是因为模板里 `## Key Decisions` 要求 `**[决策]**: [简要理由]`——**理由往往只在 thinking 里**：模型对外说"我来提取 TokenValidator"，而"为什么"在思考块中。
+
+**模板需要什么，序列化就保留什么**——这是产物格式反过来决定输入格式的地方。
+
+### 4.9 发请求：三个刻意的选择
+
+```typescript
+// compaction.ts:581
+export async function completeSummarization(model, context, options, streamFn, retry, callbacks) {
+	// Summaries are standalone requests, so isolate routing and avoid cache writes that cannot be reused.
+	const requestOptions: SimpleStreamOptions = { ...options, cacheRetention: "none", sessionId: uuidv7() };
+	const produce = async () => streamFn ? (await streamFn(model, context, requestOptions)).result()
+	                                     : completeSimple(model, context, requestOptions);
+	return retryAssistantCall(produce, retry, requestOptions.signal, callbacks);
+}
+```
+
+**`cacheRetention: "none"`** —— 摘要请求的前缀独一无二（那一大坨 `<conversation>`），下次压缩内容完全不同，**缓存百分之百命中不了**。写缓存要花钱（cacheWrite 1.25×），读却永远读不到——纯亏。接 12 篇第 4 章的前缀缓存：**知道命中不了就别写**。
+
+**`sessionId: uuidv7()`** —— `isolate routing`，让路由层把它当独立请求，不与主对话混在一起。
+
+**`retryAssistantCall`** —— 函数注释：
+
+> 把这唯一一次 LLM 调用包进 `retryAssistantCall`，使**瞬时流中断**（`terminated`、socket 关闭）按配置的重试策略处理，而不是第一次失败就让整个压缩告吹。确定性错误和中断立即返回。
+
+**压缩是昂贵操作**——切点已算完，split turn 时可能已发过一次轮前缀请求。为一次 socket 抖动全盘放弃代价太大。但确定性错误不重试（重试也是一样结果），这是 07 篇"重试四层主权"在压缩路径上的体现。
+
+另外，思考等级会被继承（`createSummarizationOptions`，`:558`）：
+
+```typescript
+if (model.reasoning && thinkingLevel && thinkingLevel !== "off") options.reasoning = thinkingLevel;
+```
+
+摘要是需要理解全局的任务，让模型先想一想是合理的——代价是更慢更贵。
+
+### 4.10 失败就抛，不折成数据
+
+```typescript
+if (response.stopReason === "error") {
+	throw new Error(`Summarization failed: ${response.errorMessage || "Unknown error"}`);
+}
+```
+
+对比 10 篇学的工具执行——工具失败会变成一条 `toolResult` 回到对话里让模型自己纠正（"错误即数据"）。**摘要失败不能这么办**：没有摘要就没法压缩，没法压缩就没法继续，**这不是模型能处理的问题**。
+
+这个 `throw` 一路冒到 `_runAutoCompaction` 的 `try`，变成 `compaction_end` 事件 + `errorMessage`，最终显示给用户。
+
+### 4.11 一次摘要请求的完整形态
+
+```json
+{
+  "system": "You are a context summarization assistant… Do NOT continue the conversation…",
+  "messages": [{ "role": "user", "content": [{ "type": "text", "text":
+      "<conversation>\n[User]: 帮我重构认证模块\n[Assistant tool calls]: read(path=\"src/auth.ts\")\n[Tool result]: …前 2000 字符…\n[... 8421 more characters truncated]\n…\n</conversation>\n\n
+       <previous-summary>\n## Goal\n重构认证模块…\n</previous-summary>\n\n
+       The messages above are NEW conversation messages to incorporate…\n…七段模板…\n\n
+       Additional focus: …（若有）"
+  }]}],
+  "max_tokens": 13107,
+  "reasoning": "medium"
+}
+```
+
+**一条 user 消息包打天下。** 没有多轮、没有工具、没有缓存——一次纯粹的"给你材料，输出总结"。
+
+返回的七段 Markdown 原样存进 `compaction` 条目的 `summary`；下一轮组装上下文时（09 篇第 4 章）被 `COMPACTION_SUMMARY_PREFIX` 包成一条 user 消息：
+
+```text
+The conversation history before this point was compacted into the following summary:
+
+<summary>
+## Goal
+重构认证模块…
+## Progress
+### Done
+- [x] 提取了 TokenValidator
+…
+</summary>
+```
+
+**闭环：模板填出来 → 存进树 → 下次组装时包上标签 → 变成新对话的开头。**
 
 ---
 
@@ -951,6 +1261,15 @@ if (this._extensionRunner && savedCompactionEntry) {
 22. **归属信息要能反查。** `fromExtension` 一路带到落盘，既用于诊断，也用于判断 `details` 结构是否可信。
 23. **宁可断链也不猜结构。** 扩展接管过的 `details` 不继承——把控制权交出去的必然成本。
 24. **决策事件在前、通知事件在后。** `session_before_compact` 可取消可接管，`session_compact` 只广播且传已保存的条目。
+25. **先定产物格式，再倒推输入格式。** 摘要是七段固定模板，于是 `maxTokens`（13k 装七段）、序列化保留 thinking（`Key Decisions` 需要理由）、保留工具参数（`Preserve exact file paths`）全都由模板反推而来。
+26. **"要求"不等于"保证"。** 提示词里写了 `Preserve exact file paths` 只是对模型的请求；真要保证就得像文件清单那样用代码提取。
+27. **同一模板的两种模式，靠换提示词而非换数据。** 首次填空 vs 增量 merge，七个标题不变、每段指示不同；只把旧摘要塞进输入而不换开场白，模型会当成普通对话去总结，旧信息就丢了。
+28. **一个失败模式值得三道防线。** 防"模型接着聊"：拍平成转录稿（形式）+ 装进一条 user 消息（结构）+ `Do NOT continue`（指令）——因为失败要到解析结果时才发现。
+29. **自指难题靠有损压缩输入来解。** 摘要请求自身也会爆，故截断工具结果；判据不是长度而是"对接着干有多重要"——工具结果最长且最不需要，因为它是原始数据而摘要要的是结论。
+30. **截断要留痕。** `[... N more characters truncated]` 防止模型据不完整内容作出错误结论。
+31. **知道缓存命中不了就别写。** 摘要请求前缀独一无二，`cacheRetention: "none"`——写缓存要花钱，读却永远读不到。
+32. **昂贵操作值得重试，但只重试瞬时失败。** 压缩已算完切点、可能已发过轮前缀请求，不该因一次 socket 抖动全废；确定性错误立即返回。
+33. **不是所有错误都能折成数据。** 工具失败变 `toolResult` 让模型自纠，摘要失败只能 `throw`——没有摘要就无法继续，这不是模型能处理的问题。
 
 ---
 
@@ -979,15 +1298,24 @@ if (this._extensionRunner && savedCompactionEntry) {
 21. 劈开一轮之后，协议上有问题吗？语义上缺了什么？
 22. 轮前缀摘要的职责是什么？为什么预算只有一半？
 23. 大摘要包含轮前缀那段吗？`historyEnd` 那一行是怎么保证的？不重叠有哪三个好处？
-24. `previousSummary` 解决什么问题？它和 `boundaryStart` 接力分别管什么？
-25. 文件操作追踪只认哪三个工具、哪个参数？`grep` 为什么不算？
-26. 读过又改过的文件会出现在哪个清单里？为什么？
-27. 文件清单为什么要同时存成文本和结构化两种形态？
-28. 上一次压缩若由扩展接管，这次的文件清单会怎样？为什么 pi 宁可这样？
-29. 压缩生效的三行代码分别做了什么？之后靠什么让 agent-loop 拿到新上下文？
-30. `estimatedTokensAfter` 为什么只能估？它参与判定吗？
-31. `session_before_compact` 与 `session_compact` 有何不同？后者为什么传"已保存的条目"？
+24. 摘要的产物是什么形态？七段分别是什么？为什么说它"不是给人看的纪要"？
+25. `maxTokens` 为什么取 `reserveTokens` 的 80%？为什么还要和 `model.maxTokens` 取小？
+26. 两套摘要提示词是什么关系？只把旧摘要塞进输入而不换提示词，会发生什么？
+27. 防止"模型接着聊"有哪三道防线？为什么值得做三道？
+28. 摘要请求自身也可能超窗——代码怎么解？为什么单挑工具结果截断，且不伤摘要质量？
+29. 序列化时哪些内容完整保留、哪个被截断？判据是什么？
+30. `thinking` 为什么要单独一行保留？（提示：回到模板的哪一段）
+31. `cacheRetention: "none"` 的理由是什么？这和 12 篇讲的前缀缓存怎么接上？
+32. 摘要失败为什么 `throw` 而不是折成一条消息交给模型？
+33. `previousSummary` 解决什么问题？它和 `boundaryStart` 接力分别管什么？
+34. 文件操作追踪只认哪三个工具、哪个参数？`grep` 为什么不算？
+35. 读过又改过的文件会出现在哪个清单里？为什么？
+36. 文件清单为什么要同时存成文本和结构化两种形态？
+37. 上一次压缩若由扩展接管，这次的文件清单会怎样？为什么 pi 宁可这样？
+38. 压缩生效的三行代码分别做了什么？之后靠什么让 agent-loop 拿到新上下文？
+39. `estimatedTokensAfter` 为什么只能估？它参与判定吗？
+40. `session_before_compact` 与 `session_compact` 有何不同？后者为什么传"已保存的条目"？
 
 ---
 
-> **接下来**：`generateSummaryWithUsage` 内部（摘要提示词长什么样、`reserveTokens` 如何变成 `maxTokens`、重试如何接入）、消息序列化的 `TOOL_RESULT_MAX_CHARS` 截断、手动 `/compact` 的 `customInstructions` 路径，以及 `branch-summarization.ts`（431 行，与压缩共用基础设施）。
+> **接下来**：手动 `/compact` 的完整路径（入口、交互、与自动压缩共用哪些代码），以及 `branch-summarization.ts`（431 行，与压缩共用基础设施）。
