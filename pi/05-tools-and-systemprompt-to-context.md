@@ -1,22 +1,22 @@
-# 12 — 汇合：`tools` 与 `systemPrompt` 怎么进 `Context`
+# 05 — 汇合：`tools` 与 `systemPrompt` 怎么进 `Context`
 
-> 学习系列第 12 篇，与 11 篇直接接续，也是 08–12 这一环的**合龙点**。
+> 学习系列第 5 篇，与 04 篇直接接续，也是 01–05 这一环的**合龙点**。
 >
-> 09 篇跟完了 `Context.messages`（树 → 路径 → 消息 → 报文），10 篇跟完了它怎么回来，11 篇跟完了扩展从磁盘文件变成盒子。但 `Context` 是三个字段：
+> 02 篇跟完了 `Context.messages`（树 → 路径 → 消息 → 报文），03 篇跟完了它怎么回来，04 篇跟完了扩展从磁盘文件变成盒子。但 `Context` 是三个字段：
 >
 > ```typescript
 > export interface Context {
 > 	systemPrompt?: string;   // ← 本篇
-> 	messages: Message[];     // ← 09 + 10
+> 	messages: Message[];     // ← 02 + 03
 > 	tools?: Tool[];          // ← 本篇
 > }
 > ```
 >
 > 本篇把剩下两条支流跟到底：**盒子里的工具怎么变成模型能调用的清单，散落各处的资源怎么拼成一段系统提示词。** 跟完之后，`Context` 三个字段全部溯源到底。
 >
-> 11 篇停在 `_refreshToolRegistry` 这个名字上，本篇从这里开始。
+> 04 篇停在 `_refreshToolRegistry` 这个名字上，本篇从这里开始。
 >
-> 第 4 章是路旁参照，但值得单独一提：它从 `defer_loading` 这个不起眼的标记出发，挖出了**前缀缓存**这条横切线——为什么改动的代价取决于它落在第几个 token，为什么"每轮重发全部历史"离了缓存就不成立，以及 pi 为此付出的三道安全闸。这条线和 07 篇（成本与健壮性）的主题重叠，但入口完全不同。
+> 第 4 章是路旁参照，但值得单独一提：它从 `defer_loading` 这个不起眼的标记出发，挖出了**前缀缓存**这条横切线——为什么改动的代价取决于它落在第几个 token，为什么"每轮重发全部历史"离了缓存就不成立，以及 pi 为此付出的三道安全闸。这条线和 `generated/robustness-and-cost` 的主题重叠，但入口完全不同。
 >
 > 所有 `文件:行号` 基于 commit `859bd29bd`。核心文件六个：`core/agent-session.ts`（结算与覆盖）、`core/system-prompt.ts`（拼装）、`core/extensions/runner.ts`（链式改写）、`core/extensions/wrapper.ts`（工具包装）、`packages/ai/src/utils/deferred-tools.ts` + `packages/ai/src/api/anthropic-messages.ts`（前缀缓存与延迟加载）、`packages/agent/src/agent-loop.ts`（每轮取用）。
 
@@ -62,7 +62,7 @@ cwd ─────────────┼─► 拼装 ─► _baseSystemPr
 
 ### 2.1 摊平：`getAllRegisteredTools`（`runner.ts:464`）
 
-11 篇讲过，扩展的工具躺在各自盒子的 `tools` Map 里。第一步是摊平：
+04 篇讲过，扩展的工具躺在各自盒子的 `tools` Map 里。第一步是摊平：
 
 ```typescript
 getAllRegisteredTools(): RegisteredTool[] {
@@ -78,7 +78,7 @@ getAllRegisteredTools(): RegisteredTool[] {
 }
 ```
 
-**同名工具，先加载的赢。** 又是那个"先来先得"——11 篇的发现段去重、`getMessageRenderer` 都是这个套路。所以项目扩展的工具会挡住全局扩展的同名工具。
+**同名工具，先加载的赢。** 又是那个"先来先得"——04 篇的发现段去重、`getMessageRenderer` 都是这个套路。所以项目扩展的工具会挡住全局扩展的同名工具。
 
 ### 2.2 三个来源汇总（`agent-session.ts:2733`）
 
@@ -106,7 +106,7 @@ for (const tool of allCustomTools) {
 }
 ```
 
-三个来源各自被套上 `sourceInfo` 标明出身：`<builtin:read>` / `<sdk:xxx>` / 扩展自己的路径。**尖括号合成标识**跟 11 篇内联扩展的 `<inline>` 是同一个约定。
+三个来源各自被套上 `sourceInfo` 标明出身：`<builtin:read>` / `<sdk:xxx>` / 扩展自己的路径。**尖括号合成标识**跟 04 篇内联扩展的 `<inline>` 是同一个约定。
 
 **覆盖方向：内置铺底，自定义后写。** 所以扩展可以用同名工具替换掉内置的 `read`——这是有意留的口子。
 
@@ -158,7 +158,7 @@ this._toolRegistry = toolRegistry;                                           // 
 | 含来源信息 | ✅ | ❌ |
 | 给谁用 | TUI 渲染、`/tools` 显示、诊断 | agent-core 执行、发给模型 |
 
-**同一批工具，两种投影。** 跟 09 篇 `sessionEntryToContextMessages` 是同一个模式——**一份源数据，按消费方的需要各投一份，谁也别迁就谁**。
+**同一批工具，两种投影。** 跟 02 篇 `sessionEntryToContextMessages` 是同一个模式——**一份源数据，按消费方的需要各投一份，谁也别迁就谁**。
 
 #### `wrapRegisteredTool` 到底干什么（`extensions/wrapper.ts:22`）
 
@@ -198,7 +198,7 @@ export function wrapToolDefinition(definition, ctxFactory?): AgentTool {
 
 > 所有工具共享同一上下文工厂，但每次实际调用都会创建最新的 runner context，而非复用旧快照。
 
-跟 11 篇第 7 章的"现查现用"同源——**不缓存派生状态，用的时候现造，永不过期**。
+跟 04 篇第 7 章的"现查现用"同源——**不缓存派生状态，用的时候现造，永不过期**。
 
 **事二：探测工具是否"解锁"了新工具**（`wrapper.ts:28-41`）
 
@@ -314,7 +314,7 @@ setActiveToolsByName(toolNames: string[]): void {
 { "type": "toolCall", "id": "toolu_01x", "name": "git_recent", "arguments": { "count": 5 } }
 ```
 
-要真去执行，得拿这个 `name` 回查——查的正是 `Context.tools`。10 篇的 T3 段里查了两次：
+要真去执行，得拿这个 `name` 回查——查的正是 `Context.tools`。03 篇的 T3 段里查了两次：
 
 **① 决定串行还是并行**（`agent-loop.ts:449-456`）
 
@@ -329,7 +329,7 @@ if (config.toolExecution === "sequential" || hasSequentialToolCall) {
 return executeToolCallsParallel(...);
 ```
 
-`executionMode` 只存在于工具定义里，只能查表拿到。`.some(...)` 意味着**只要有一个工具声明 `sequential`，整批退回串行**（10 篇记的"一个 sequential 拖累全批"）——因为 `sequential` 的语义是"我不能和别人同时跑"，批次里就没有安全的并行划分了。
+`executionMode` 只存在于工具定义里，只能查表拿到。`.some(...)` 意味着**只要有一个工具声明 `sequential`，整批退回串行**（03 篇记的"一个 sequential 拖累全批"）——因为 `sequential` 的语义是"我不能和别人同时跑"，批次里就没有安全的并行划分了。
 
 注意 `?.executionMode`：查不到时整个表达式是 `undefined`，**不算 sequential**。这里不处理"找不到"，留给下一处。
 
@@ -345,7 +345,7 @@ const validatedArgs = validateToolArguments(tool, preparedToolCall); // 用 tool
 // → 最后调 tool.execute
 ```
 
-`kind: "immediate"` 的意思是"不用真执行，结果已经有了"。它和正常路径共用同一个返回类型，所以上层不必区分"没找到"和"执行失败"——**都变成一条 `toolResult` 消息回到对话里**，模型下一轮读到 `Tool xxx not found` 自行纠正。同一函数里 `signal?.aborted`、`beforeResult?.block` 走的也是这个形状：**中断、被扩展拦截、工具不存在，三种原因同一种表达**（07 篇"错误即数据"的兑现）。
+`kind: "immediate"` 的意思是"不用真执行，结果已经有了"。它和正常路径共用同一个返回类型，所以上层不必区分"没找到"和"执行失败"——**都变成一条 `toolResult` 消息回到对话里**，模型下一轮读到 `Tool xxx not found` 自行纠正。同一函数里 `signal?.aborted`、`beforeResult?.block` 走的也是这个形状：**中断、被扩展拦截、工具不存在，三种原因同一种表达**（`generated/robustness-and-cost` 讲的"错误即数据"的兑现）。
 
 `if (!tool)` 不是防御性冗余，几条路径都会真走到：模型幻觉编了个名字；某工具执行时调 `setActiveTools` 关掉了同批次里的另一个；模型基于上一轮的清单作答而这一轮清单变了。
 
@@ -744,11 +744,11 @@ tools: [read, bash, edit, plan_write]   ← 第 2,000 个 token 处变了
 后面 83,000 token 的缓存全部作废
 ```
 
-**用 200 token 的新增，废掉 83,000 token 的缓存。** 按 07 篇的价格结构（cacheRead 约 0.1× 基础输入价），这一轮的输入成本差着近十倍。
+**用 200 token 的新增，废掉 83,000 token 的缓存。** 按 `generated/robustness-and-cost` 的价格结构（cacheRead 约 0.1× 基础输入价），这一轮的输入成本差着近十倍。
 
 这解释了两件事：
 
-**① 为什么"每轮重发全部历史"在经济上成立。** 08/10 篇讲过 pi 每轮把完整历史重新发一遍。若没有前缀缓存，80k token 的会话每轮全价重发，没人用得起。**缓存不是锦上添花的优化，是这个架构能跑起来的前提。**
+**① 为什么"每轮重发全部历史"在经济上成立。** 01/03 篇讲过 pi 每轮把完整历史重新发一遍。若没有前缀缓存，80k token 的会话每轮全价重发，没人用得起。**缓存不是锦上添花的优化，是这个架构能跑起来的前提。**
 
 **② 为什么工具集中途变化是个专门要处理的问题。** 计划模式切换、扩展运行期注册工具——这些场景一旦发生往往反复发生，每次都打穿一次缓存。
 
@@ -1051,7 +1051,7 @@ _systemPromptOverride  ← 扩展每轮改写           （每轮驱动，一轮
       override ?? base   ← 求值时才合成
 ```
 
-**分层存储、取用时合成，别提前把层压平。** 压平了就再也拆不开——跟 08 篇会话树是同一个思路。
+**分层存储、取用时合成，别提前把层压平。** 压平了就再也拆不开——跟 01 篇会话树是同一个思路。
 
 ### 5.3 每轮怎么设（`agent-session.ts:1372-1402`）
 
@@ -1090,7 +1090,7 @@ if (result?.systemPrompt !== undefined) {
 
 ### 5.4 链式改写的含义（`runner.ts:1110-1153`）
 
-11 篇第 7 章列过四种聚合语义，这里是"链式"的实例。四种的区别：
+04 篇第 7 章列过四种聚合语义，这里是"链式"的实例。四种的区别：
 
 ```text
 【广播】     每个收到同样的输入，返回值丢弃
@@ -1238,7 +1238,7 @@ return {
 两个后果，注释里都点了：
 
 - **惰性没了**（`stay lazy`）——本轮中途换了模型，handler 读到的还是旧的。
-- **失效检查被绕过**（`bypassing stale-instance checks`）——`assertActive()` 只在展开那一刻跑过一次；此后会话被替换、ctx 已失效，读 `ctx.cwd` 照样返回旧值，**该抛的错不抛了**。这正是 11 篇那两道防线之一被拆掉。
+- **失效检查被绕过**（`bypassing stale-instance checks`）——`assertActive()` 只在展开那一刻跑过一次；此后会话被替换、ctx 已失效，读 `ctx.cwd` 照样返回旧值，**该抛的错不抛了**。这正是 04 篇那两道防线之一被拆掉。
 
 |  | `{ ...ctx }` | `defineProperties` + `getOwnPropertyDescriptors` |
 |---|---|---|
@@ -1274,9 +1274,9 @@ private async _runAgentPrompt(messages: AgentMessage | AgentMessage[]): Promise<
 
 #### 5.6.1 顺带认识这个函数：一次"用户回合"的边界
 
-12 篇只用到它 `finally` 里的一行，但这个函数本身是**会话层生命周期的骨架**，值得整段看懂。它的两个调用点（`:1415` 用户 prompt、`:1639` 扩展 `sendMessage` 触发轮次）收拢了所有"跑一次 agent"的路径。
+05 篇只用到它 `finally` 里的一行，但这个函数本身是**会话层生命周期的骨架**，值得整段看懂。它的两个调用点（`:1415` 用户 prompt、`:1639` 扩展 `sendMessage` 触发轮次）收拢了所有"跑一次 agent"的路径。
 
-**`while` 里的"继续"和 agent 循环内部的"继续"不是一回事。** `agent.prompt()` 返回时，10 篇讲的那个 `while(true)` 已经跑完、`agent_end` 已经发过了；是**会话层**决定还要不要再来一轮（`_handlePostAgentRun`，`:1199`）：
+**`while` 里的"继续"和 agent 循环内部的"继续"不是一回事。** `agent.prompt()` 返回时，03 篇讲的那个 `while(true)` 已经跑完、`agent_end` 已经发过了；是**会话层**决定还要不要再来一轮（`_handlePostAgentRun`，`:1199`）：
 
 ```typescript
 private async _handlePostAgentRun(): Promise<boolean> {
@@ -1295,13 +1295,13 @@ private async _handlePostAgentRun(): Promise<boolean> {
 
 第 ③ 条的注释点出一个微妙处：**agent 自己清过队列才发 `agent_end`，但 `agent_end` 的扩展处理器又能往队列里塞消息**——那批只能由外层再转一圈才送得出去。
 
-于是循环层次比 10 篇画的多一层：
+于是循环层次比 03 篇画的多一层：
 
 ```text
 _runAgentPrompt 的 while          ← 会话层：重试 / 压缩 / 扩展补刀
-  └─ agent-loop 的 while(true)    ← 10 篇：follow-up
-       └─ 内层 while              ← 10 篇：工具轮次
-            └─ for await          ← 10 篇：SSE 事件
+  └─ agent-loop 的 while(true)    ← 03 篇：follow-up
+       └─ 内层 while              ← 03 篇：工具轮次
+            └─ for await          ← 03 篇：SSE 事件
 ```
 
 `finally` 里另外两行也各有职责：`_flushPendingBashMessages()` 把 agent 运行期间用 `!` 执行的命令结果统一落地（中途不能插进消息流）；`_emitAgentSettled()` 置 `_isAgentRunActive = false` 并唤醒等在 `waitForIdle` 上的人。
@@ -1343,7 +1343,7 @@ this.agent.prepareNextTurnWithContext = async (turn, signal) => {
 // Build LLM context
 const llmContext: Context = {
 	systemPrompt: context.systemPrompt,
-	messages: llmMessages,           // ← 09 篇：每轮现算（树 → 路径 → 消息）
+	messages: llmMessages,           // ← 02 篇：每轮现算（树 → 路径 → 消息）
 	tools: context.tools,            // ← 直接取，不重算
 };
 ```
@@ -1370,17 +1370,17 @@ tools ────── 盒子.tools → 摊平 → 三来源汇总 → 闸 →
                                                             ↓ 沿用旧状态 + 只补新增
                                                     agent.state.tools → .slice()
 
-messages ─── 会话树 → buildSessionPath → buildContextEntries → convertToLlm   （09 篇）
+messages ─── 会话树 → buildSessionPath → buildContextEntries → convertToLlm   （02 篇）
 
                           ↓ prepareNextTurnWithContext 每轮刷入
                     Context { systemPrompt, messages, tools }
                           ↓ convertTools / 消息序列化
-                    HTTP 请求                                                   （09 篇）
+                    HTTP 请求                                                   （02 篇）
                           ↓ SSE
-                    状态机 → AssistantMessage → 落盘                             （10 篇）
+                    状态机 → AssistantMessage → 落盘                             （03 篇）
 ```
 
-**08–12 的闭环合上了。** 从磁盘上的会话文件和扩展文件出发，到发给模型的请求体，再从模型的字节流回到磁盘。
+**01–05 的闭环合上了。** 从磁盘上的会话文件和扩展文件出发，到发给模型的请求体，再从模型的字节流回到磁盘。
 
 ---
 
@@ -1478,8 +1478,8 @@ messages ─── 会话树 → buildSessionPath → buildContextEntries → co
 
 ---
 
-> **闭环说明**：08（会话树）→ 09（Context 出去）→ 10（Context 回来）→ 11（扩展装配线）→ 12（tools 与 systemPrompt 汇合），到此 `Context` 三个字段全部溯源到底，主循环一圈走完。
+> **闭环说明**：01（会话树）→ 02（Context 出去）→ 03（Context 回来）→ 04（扩展装配线）→ 05（tools 与 systemPrompt 汇合），到此 `Context` 三个字段全部溯源到底，主循环一圈走完。
 >
-> **第 4 章那条横切线**：前缀缓存是本系列第一次正面撞上"成本"这个维度——它不跟数据路径走，跟钱走。07 篇（健壮性与成本）从另一个入口讲了同一件事：Usage 五桶、cacheRead 0.1× 与 1h 写 2× 的价格结构、`cache_control` 滚动前缀怎么放、`cache-stats.ts` 归因审计器。两篇可对照读。
+> **第 4 章那条横切线**：前缀缓存是本系列第一次正面撞上"成本"这个维度——它不跟数据路径走，跟钱走。`generated/robustness-and-cost` 从另一个入口讲了同一件事：Usage 五桶、cacheRead 0.1× 与 1h 写 2× 的价格结构、`cache_control` 滚动前缀怎么放、`cache-stats.ts` 归因审计器，可对照读。
 >
-> **仍欠**：08 篇的压缩机制四块（触发时机、摘要生成、文件操作追踪、扩展接管）；skill / prompt / theme 的加载生产端；09 篇 4.3 记的 `retainedTail` 建模差异待查。
+> **仍欠**：01 篇的压缩机制四块（触发时机、摘要生成、文件操作追踪、扩展接管）；skill / prompt / theme 的加载生产端；02 篇 4.3 记的 `retainedTail` 建模差异待查。

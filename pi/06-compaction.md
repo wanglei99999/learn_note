@@ -1,15 +1,15 @@
-# 13 — 压缩：一次压缩的完整生命
+# 06 — 压缩：一次压缩的完整生命
 
-> 学习系列第 13 篇。08 篇跟了压缩的**一半**——切点怎么算（`findCutPoint` / `isSplitTurn` / `boundaryStart` 接力）；本篇跟另一半：**什么时候压、谁来压、摘要怎么生成、压完怎么生效**。
+> 学习系列第 6 篇。01 篇跟了压缩的**一半**——切点怎么算（`findCutPoint` / `isSplitTurn` / `boundaryStart` 接力）；本篇跟另一半：**什么时候压、谁来压、摘要怎么生成、压完怎么生效**。
 >
 > 压缩是 pi 里唯一会**主动改写历史**的机制。别处都是只读会话树、追加新条目；只有它会说"这段以后就用摘要代替了"。也因此它同时用到前五篇的东西：
 >
 > ```
-> 它要读会话树       → 08
-> 它要重组上下文     → 09
-> 它自己发一次请求   → 10
-> 扩展能接管它       → 11
-> 压完 Context 变了  → 12
+> 它要读会话树       → 01
+> 它要重组上下文     → 02
+> 它自己发一次请求   → 03
+> 扩展能接管它       → 04
+> 压完 Context 变了  → 05
 > ```
 >
 > **本篇的主路径是「一次压缩的生命」**：上下文快满 → 判定 → 编排 → 生成摘要 → 落盘 → 新上下文生效。第 1 章先解决"它到底在哪儿发生"——这是理解其余一切的前提。
@@ -48,7 +48,7 @@ agent-session.ts         ★ 压缩住在这里
 agent.ts                 存着 state.messages，管"一次只能跑一个"
       │  调用
       ▼
-agent-loop.ts            10 篇讲的 T0–T6 全在这
+agent-loop.ts            03 篇讲的 T0–T6 全在这
       │  调用
       ▼
 anthropic-messages.ts    组请求体、发 HTTP、收 SSE
@@ -82,7 +82,7 @@ private async _runAgentPrompt(messages): Promise<void> {
 
 **压缩发生在 `agent-loop.ts` 已经全部跑完、控制权交回 `agent-session.ts` 之后。不是在循环里面。**
 
-> ⚠️ 10 篇 6.5 原先写「自动压缩挂在 `prepareNextTurn` 上、落在 T4–T5 之间」，**那是错的**，已于 2026-08-19 更正。`prepareNextTurn`（`agent-session.ts:584`）只刷 `systemPrompt` / `tools` / `model` / `thinkingLevel`（12 篇 6.1）。
+> ⚠️ 03 篇 6.5 原先写「自动压缩挂在 `prepareNextTurn` 上、落在 T4–T5 之间」，**那是错的**，已于 2026-08-19 更正。`prepareNextTurn`（`agent-session.ts:584`）只刷 `systemPrompt` / `tools` / `model` / `thinkingLevel`（05 篇 6.1）。
 
 ### 1.3 为什么必须在外面：快照语义
 
@@ -126,8 +126,8 @@ agent-loop.ts 手里那份【副本】不会跟着变
 同一批消息在三处各有一份，形态与寿命都不同：
 
 ```text
-agent-session.ts   .jsonl 文件 + 内存索引       永久、只增不删、树状     （08 篇）
-                        ↓ buildSessionPath → buildContextEntries → convertToLlm （09 篇）
+agent-session.ts   .jsonl 文件 + 内存索引       永久、只增不删、树状     （01 篇）
+                        ↓ buildSessionPath → buildContextEntries → convertToLlm （02 篇）
 agent.ts           state.messages: AgentMessage[]  线性数组、跨 run 存活
                         ↓ createContextSnapshot()  ★ .slice()
 agent-loop.ts      currentContext.messages          局部变量、run 结束就没了
@@ -322,7 +322,7 @@ export function shouldCompact(contextTokens, contextWindow, settings): boolean {
 export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
 	enabled: true,
 	reserveTokens: 16384,      // 留给"下一次回答 + 恢复流程"的空间
-	keepRecentTokens: 20000,   // 08 篇学过：保留区大小
+	keepRecentTokens: 20000,   // 01 篇学过：保留区大小
 };
 ```
 
@@ -360,7 +360,7 @@ export function calculateContextTokens(usage: Usage): number {
 
 > 优先采用 provider 返回的总量，缺失时才汇总输入、输出与缓存计数，**避免重复估算已确认的历史**。
 
-注意 `cacheRead` **算进去了**——那些内容虽然命中缓存、很便宜，但**仍然占着窗口**。**省钱和省窗口是两回事**（12 篇第 4 章讲的前缀缓存管前者，这里管后者）。
+注意 `cacheRead` **算进去了**——那些内容虽然命中缓存、很便宜，但**仍然占着窗口**。**省钱和省窗口是两回事**（05 篇第 4 章讲的前缀缓存管前者，这里管后者）。
 
 **兜底：往回找最后一条有效 usage**
 
@@ -394,14 +394,14 @@ if (compactionEntry && usageMsg.role === "assistant"
 **这和闸 4 是同一个问题，但发生在更隐蔽的位置。** 闸 4 拦的是"传进来那条太老"；这里拦的是"传进来那条是新的（过了闸 4），但它没有可用 usage，往回找，找到的却是压缩之前的"。
 
 ```text
-压缩前的消息  usage = 190k    ← 保留区里还留着它（08 篇：保留区原样保留）
+压缩前的消息  usage = 190k    ← 保留区里还留着它（01 篇：保留区原样保留）
 压缩发生
 压缩后的消息  529 错误，无 usage
                   ↓
           往回找 → 找到那条 190k → 以为还满着 → 又压一次 ❌
 ```
 
-**保留区里的老消息带着老 usage，是压缩的固有副作用**：08 篇学的"保留区原样留下"意味着它们的 `usage` 字段也原样留下，而那些数字描述的是压缩前的世界。
+**保留区里的老消息带着老 usage，是压缩的固有副作用**：01 篇学的"保留区原样留下"意味着它们的 `usage` 字段也原样留下，而那些数字描述的是压缩前的世界。
 
 **凡是要用某条消息的 usage，都得先确认它产生于压缩之后。** 这个检查在 `_checkCompaction` 里出现两次，对象不同、道理相同。
 
@@ -436,16 +436,16 @@ if (this.agent.streamFunction === streamSimple) {
 }
 ```
 
-压缩是一次**独立的** LLM 调用，得自己取密钥，不能复用对话那次的——与 09 篇"最后一刻才解析密钥"同源。
+压缩是一次**独立的** LLM 调用，得自己取密钥，不能复用对话那次的——与 02 篇"最后一刻才解析密钥"同源。
 
-### 3.2 ③ `prepareCompaction` = 08 篇的全部内容
+### 3.2 ③ `prepareCompaction` = 01 篇的全部内容
 
 ```typescript
 const preparation = prepareCompaction(pathEntries, settings);
 if (!preparation) return false;
 ```
 
-08 篇学的 `findCutPoint`、`boundaryStart` 接力、`isSplitTurn`、`firstKeptEntryIndex`，全在 `prepareCompaction`（`compaction.ts:738`）里面。
+01 篇学的 `findCutPoint`、`boundaryStart` 接力、`isSplitTurn`、`firstKeptEntryIndex`，全在 `prepareCompaction`（`compaction.ts:738`）里面。
 
 返回 `null` 表示"压不动"（例如保留区之外已无内容），**直接放弃，不报错**。
 
@@ -473,7 +473,7 @@ if (this._extensionRunner.hasHandlers("session_before_compact")) {
 }
 ```
 
-这是 11 篇钩子体系里**最重量级的一个**：
+这是 04 篇钩子体系里**最重量级的一个**：
 
 | 钩子 | 扩展能干什么 |
 |---|---|
@@ -500,7 +500,7 @@ const compactResult = await compact(
 );
 ```
 
-**摘要走的是和正常对话完全相同的那条管线**（10 篇学的 SSE 解析、状态机全部适用），不是另起一套。
+**摘要走的是和正常对话完全相同的那条管线**（03 篇学的 SSE 解析、状态机全部适用），不是另起一套。
 
 ### 3.5 ⑥ 中断检查的位置：生成之后、落盘之前
 
@@ -543,7 +543,7 @@ isSplitTurn && turnPrefixMessages.length > 0 ?
 
 ```typescript
 const result = await generateSummaryWithUsage(
-	messagesToSummarize,      // ★ 要摘要的那段（08 篇算出来的）
+	messagesToSummarize,      // ★ 要摘要的那段（01 篇算出来的）
 	model, settings.reserveTokens, apiKey, headers, signal,
 	customInstructions,       // 手动 /compact 时用户可加要求
 	previousSummary,          // ★ 上一次的摘要
@@ -560,13 +560,13 @@ const result = await generateSummaryWithUsage(
 
 不传的话，第二次摘要只覆盖 51–120，**前 50 条的信息彻底消失**。
 
-**两个接力，各管一头**：08 篇的 `boundaryStart` 接力保证"每条原始记录最多被摘要一次"（管输入范围）；`previousSummary` 保证"已被摘要的内容不会因再次压缩而丢失"（管信息传承）。
+**两个接力，各管一头**：01 篇的 `boundaryStart` 接力保证"每条原始记录最多被摘要一次"（管输入范围）；`previousSummary` 保证"已被摘要的内容不会因再次压缩而丢失"（管信息传承）。
 
 **`reserveTokens` 在这里换了用途**：阈值判定里它是"什么时候压"，这里是"摘要能写多长"。同一个配置项，两处含义。
 
 ### 4.2 复习：什么是"切在轮中间"
 
-先把 08 篇的概念补回来。会话里的消息是**成组**的，一组 = 一轮：
+先把 01 篇的概念补回来。会话里的消息是**成组**的，一组 = 一轮：
 
 ```text
 轮 1  ┌ user        "帮我看看 config.ts"
@@ -697,7 +697,7 @@ if (!firstKeptEntryId) {
 }
 ```
 
-08 篇学过"存 id，算 index"——`firstKeptEntryId` 是要持久化的 uuid。老会话文件可能没有，这里**直接抛错要求迁移，而不是编一个**。
+01 篇学过"存 id，算 index"——`firstKeptEntryId` 是要持久化的 uuid。老会话文件可能没有，这里**直接抛错要求迁移，而不是编一个**。
 
 但它抛在**所有请求都发完之后**——摘要白生成了。**判断**：放在函数开头更省钱，现有位置是可改进点。
 
@@ -821,7 +821,7 @@ if (customInstructions) {
 `generateSummaryWithUsage` 里这两行看着平平无奇：
 
 ```typescript
-const llmMessages = convertToLlm(currentMessages);            // 先归一化（09 篇那个投影函数）
+const llmMessages = convertToLlm(currentMessages);            // 先归一化（02 篇那个投影函数）
 const conversationText = serializeConversation(llmMessages);  // 再拍平成文本
 ```
 
@@ -944,7 +944,7 @@ export async function completeSummarization(model, context, options, streamFn, r
 }
 ```
 
-**`cacheRetention: "none"`** —— 摘要请求的前缀独一无二（那一大坨 `<conversation>`），下次压缩内容完全不同，**缓存百分之百命中不了**。写缓存要花钱（cacheWrite 1.25×），读却永远读不到——纯亏。接 12 篇第 4 章的前缀缓存：**知道命中不了就别写**。
+**`cacheRetention: "none"`** —— 摘要请求的前缀独一无二（那一大坨 `<conversation>`），下次压缩内容完全不同，**缓存百分之百命中不了**。写缓存要花钱（cacheWrite 1.25×），读却永远读不到——纯亏。接 05 篇第 4 章的前缀缓存：**知道命中不了就别写**。
 
 **`sessionId: uuidv7()`** —— `isolate routing`，让路由层把它当独立请求，不与主对话混在一起。
 
@@ -952,7 +952,7 @@ export async function completeSummarization(model, context, options, streamFn, r
 
 > 把这唯一一次 LLM 调用包进 `retryAssistantCall`，使**瞬时流中断**（`terminated`、socket 关闭）按配置的重试策略处理，而不是第一次失败就让整个压缩告吹。确定性错误和中断立即返回。
 
-**压缩是昂贵操作**——切点已算完，split turn 时可能已发过一次轮前缀请求。为一次 socket 抖动全盘放弃代价太大。但确定性错误不重试（重试也是一样结果），这是 07 篇"重试四层主权"在压缩路径上的体现。
+**压缩是昂贵操作**——切点已算完，split turn 时可能已发过一次轮前缀请求。为一次 socket 抖动全盘放弃代价太大。但确定性错误不重试（重试也是一样结果），这是 `generated/robustness-and-cost` 讲的"重试四层主权"在压缩路径上的体现。
 
 另外，思考等级会被继承（`createSummarizationOptions`，`:558`）：
 
@@ -970,7 +970,7 @@ if (response.stopReason === "error") {
 }
 ```
 
-对比 10 篇学的工具执行——工具失败会变成一条 `toolResult` 回到对话里让模型自己纠正（"错误即数据"）。**摘要失败不能这么办**：没有摘要就没法压缩，没法压缩就没法继续，**这不是模型能处理的问题**。
+对比 03 篇学的工具执行——工具失败会变成一条 `toolResult` 回到对话里让模型自己纠正（"错误即数据"）。**摘要失败不能这么办**：没有摘要就没法压缩，没法压缩就没法继续，**这不是模型能处理的问题**。
 
 这个 `throw` 一路冒到 `_runAutoCompaction` 的 `try`，变成 `compaction_end` 事件 + `errorMessage`，最终显示给用户。
 
@@ -992,7 +992,7 @@ if (response.stopReason === "error") {
 
 **一条 user 消息包打天下。** 没有多轮、没有工具、没有缓存——一次纯粹的"给你材料，输出总结"。
 
-返回的七段 Markdown 原样存进 `compaction` 条目的 `summary`；下一轮组装上下文时（09 篇第 4 章）被 `COMPACTION_SUMMARY_PREFIX` 包成一条 user 消息：
+返回的七段 Markdown 原样存进 `compaction` 条目的 `summary`；下一轮组装上下文时（02 篇第 4 章）被 `COMPACTION_SUMMARY_PREFIX` 包成一条 user 消息：
 
 ```text
 The conversation history before this point was compacted into the following summary:
@@ -1186,9 +1186,9 @@ this.agent.state.messages = sessionContext.messages;
 
 ```text
 第 1 行  往【会话树】追加一条 compaction 条目           ← agent-session.ts 的世界
-第 2 行  重跑 09 篇那条组装链
+第 2 行  重跑 02 篇那条组装链
          buildSessionPath → buildContextEntries → convertToLlm
-         （这次会走 09 篇第 4 章那个"摘要放回坑位"的分支）
+         （这次会走 02 篇第 4 章那个"摘要放回坑位"的分支）
 第 3 行  把结果【整个赋值】给 agent.state.messages       ← agent.ts 的世界
 ```
 
@@ -1372,7 +1372,7 @@ compact(…): Promise<CompactionResult>          // 交付"这是压缩的成果
 分支摘要  你要跳到别处去   →  离开当前分支，把这一段的成果记下来
 ```
 
-08 篇学过：`/tree` 跳转、fork、切换会话，本质都是移动 `leafId`。指针一移，刚才那一路干的活就**不在新路径上**了——不是被删除（树上永远留着），是不可见。
+01 篇学过：`/tree` 跳转、fork、切换会话，本质都是移动 `leafId`。指针一移，刚才那一路干的活就**不在新路径上**了——不是被删除（树上永远留着），是不可见。
 
 ```text
         ┌─ C ─ D ─ E ←── 你现在在这（干了一堆活）
@@ -1422,7 +1422,7 @@ targetPath = [A, B, F, G]        ← 从根排列
 从 E 回溯到 B（不含）：[E, D, C] → reverse → [C, D, E]
 ```
 
-**这就是"要摘要的那一段"。** 09 篇 3.1 讲的那个 `while (current)` 父链遍历，在这里又出现一次——只是终点从 `undefined` 换成了 `commonAncestorId`。
+**这就是"要摘要的那一段"。** 02 篇 3.1 讲的那个 `while (current)` 父链遍历，在这里又出现一次——只是终点从 `undefined` 换成了 `commonAncestorId`。
 
 #### 同一个问题，两个相反的答案
 
@@ -1596,7 +1596,7 @@ export function prepareBranchEntries(entries: SessionEntry[], tokenBudget: numbe
 28. 摘要请求自身也可能超窗——代码怎么解？为什么单挑工具结果截断，且不伤摘要质量？
 29. 序列化时哪些内容完整保留、哪个被截断？判据是什么？
 30. `thinking` 为什么要单独一行保留？（提示：回到模板的哪一段）
-31. `cacheRetention: "none"` 的理由是什么？这和 12 篇讲的前缀缓存怎么接上？
+31. `cacheRetention: "none"` 的理由是什么？这和 05 篇讲的前缀缓存怎么接上？
 32. 摘要失败为什么 `throw` 而不是折成一条消息交给模型？
 33. `previousSummary` 解决什么问题？它和 `boundaryStart` 接力分别管什么？
 34. 文件操作追踪只认哪三个工具、哪个参数？`grep` 为什么不算？
