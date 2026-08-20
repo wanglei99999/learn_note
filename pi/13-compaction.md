@@ -16,7 +16,7 @@
 >
 > 所有 `文件:行号` 基于 commit `859bd29bd`。核心文件三个：`core/agent-session.ts`（触发与编排）、`core/compaction/compaction.ts`（切点与生成）、`core/compaction/utils.ts`（文件操作与序列化）。
 >
-> ⬜ **本篇尚未覆盖**：手动 `/compact` 的完整路径（`customInstructions` 在 4.7 提过，但入口与交互未跟）、`branch-summarization.ts`（431 行，与压缩共用基础设施）。
+> ⬜ **本篇尚未覆盖**：`prepareBranchEntries` 的 `tokenBudget` 裁剪策略（见 7.2 末尾）。
 
 ## 目录
 
@@ -26,8 +26,9 @@
 - 第 4 章 生成段：从消息到一段摘要
 - 第 5 章 旁路：文件操作追踪
 - 第 6 章 生效段：压完怎么让新上下文起作用
-- 第 7 章 工程模式清单
-- 第 8 章 复习自测
+- 第 7 章 同一套机制的另外两个入口
+- 第 8 章 工程模式清单
+- 第 9 章 复习自测
 
 ---
 
@@ -1235,7 +1236,290 @@ if (this._extensionRunner && savedCompactionEntry) {
 
 ---
 
-## 第 7 章 工程模式清单
+## 第 7 章 同一套机制的另外两个入口
+
+前六章跟的是**自动压缩**这条主路径。同一套核心还被另外两处调用，看它们**差在哪、为什么差**，比重复核心逻辑更有价值。
+
+### 7.1 手动 `/compact`：同一机制，两种交互契约
+
+`agent-session.ts:2018` 的 `compact(customInstructions?)`。把它和 `_runAutoCompaction()` 并排，**中间一大段几乎逐行相同**：
+
+```text
+取密钥   _getSummarizationRequestAuth          ← 一样
+读会话树 sessionManager.getBranch()             ← 一样
+算切点   prepareCompaction(pathEntries, …)      ← 一样
+问扩展   session_before_compact，三种结局        ← 一样
+生成摘要 compact(preparation, …)                ← 一样（compaction.ts 那个）
+中断检查 signal.aborted                          ← 一样
+落盘刷新 appendCompaction → buildSessionContext → state.messages  ← 一样
+通知扩展 session_compact                         ← 一样
+```
+
+**差异全部来自一件事：调用者是谁、在等什么。**
+
+```text
+自动：调用者是 agent 循环刚结束的会话层
+      它在 _runAgentPrompt 的 while 里，等一个 boolean 决定要不要 continue
+手动：调用者是用户敲的 /compact
+      agent 可能正在跑，用户盯着屏幕等结果
+```
+
+#### 差异一：开场要先把 agent 停掉
+
+```typescript
+async compact(customInstructions?: string): Promise<CompactionResult> {
+	this._disconnectFromAgent();          // ★ 断开事件连接
+	await this.abort();                   // ★ 中止正在跑的 agent
+	this._compactionAbortController = new AbortController();
+	this._emit({ type: "compaction_start", reason: "manual" });
+	try {
+		…
+	} finally {
+		this._compactionAbortController = undefined;
+		this._reconnectToAgent();           // ★ 成对恢复
+	}
+}
+```
+
+自动压缩没有这两行——**它天然发生在 agent 已停下的时刻**（循环刚返回，见 1.2）。手动则可能在模型答到一半时被敲下：压缩要改 `agent.state.messages`，而 agent 正拿着它的快照在跑（1.3），不先停就会撞车。
+
+`_disconnectFromAgent` / `_reconnectToAgent` 一个在 `try` 之外、一个在 `finally` 里，保证成功、失败、取消三条路径都恢复连接。
+
+#### 差异二：两个独立的中断控制器
+
+```typescript
+private _compactionAbortController: AbortController | undefined;      // 手动
+private _autoCompactionAbortController: AbortController | undefined;  // 自动
+```
+
+不共用，是因为**两者可能同时存在**（自动压缩正跑，用户又敲了 `/compact`），共用则说不清谁 abort 了谁。
+
+但取消时一起打：
+
+```typescript
+this._compactionAbortController?.abort();
+this._autoCompactionAbortController?.abort();
+```
+
+**建的时候分开，取消的时候一起**——用户按 Esc 的意思是"全停"，不区分类型。`isCompacting` 同理，是三个控制器或起来的。
+
+#### 差异三：失败要抛，而且要分类
+
+这是最能体现"谁在等"的一处。同样是"压不动"：
+
+```typescript
+// 自动
+const preparation = prepareCompaction(pathEntries, settings);
+if (!preparation) return false;                      // ★ 静默放弃
+
+// 手动
+const preparation = prepareCompaction(pathEntries, settings);
+if (!preparation) {
+	const lastEntry = pathEntries[pathEntries.length - 1];
+	if (lastEntry?.type === "compaction") throw new Error("Already compacted");   // ★ 还要诊断原因
+	throw new Error("Nothing to compact (session too small)");
+}
+```
+
+**自动静默返回是对的**——后台行为，"这次没压"不必打扰用户。**手动必须抛**——用户主动按了按钮，什么都不发生是最糟的反馈；而且它多做一步诊断，回头看最后一条是不是 compaction 条目，好区分"刚压过"和"内容太少"。
+
+同样的分歧贯穿全函数：
+
+| 场景 | 自动 | 手动 |
+|---|---|---|
+| 没得压 | `return false` | `throw` + 区分两种原因 |
+| 扩展 cancel | `emit` + `return false` | `throw new Error("Compaction cancelled")` |
+| 中断 | `emit` + `return false` | `throw new Error("Compaction cancelled")` |
+| 没有模型 | `return false` | `throw new Error(formatNoModelSelectedMessage())` |
+
+**返回类型本身就说明了差异：**
+
+```typescript
+_runAutoCompaction(…): Promise<boolean>        // 回答"接下来怎么办"
+compact(…): Promise<CompactionResult>          // 交付"这是压缩的成果"
+```
+
+#### 差异四：`customInstructions` 只有手动才有
+
+自动那边写死 `customInstructions: undefined`。回到 4.7：它会被追加到摘要提示词末尾（`Additional focus: …`）。
+
+**只有用户知道这次压缩想侧重什么**；自动压缩是无人值守的，没有"意图"可传。
+
+#### 差异五：取消不算失败
+
+```typescript
+} catch (error) {
+	const message = error instanceof Error ? error.message : String(error);
+	const aborted = message === "Compaction cancelled" || (error instanceof Error && error.name === "AbortError");
+	this._emit({
+		type: "compaction_end", reason: "manual", result: undefined, aborted,
+		errorMessage: aborted ? undefined : `Compaction failed: ${message}`,   // ★ 取消时不填错误
+	});
+	throw error;                                                               // ★ 事件之外还要继续抛
+}
+```
+
+**"被取消"和"失败了"要分开**：前者是用户自己的选择，不该弹错误；后者才需要显示原因。判据有两个来源——自己抛的 `"Compaction cancelled"`，以及底层的 `AbortError`。
+
+最后那句 `throw error` 表明：**事件只是通知，异常才是控制流**，两条都要走。
+
+### 7.2 分支摘要：解决的是"离开"而不是"太满"
+
+`compaction/branch-summarization.ts`（431 行）。它和压缩是同目录的兄弟，共用大量基础设施，但**触发原因根本不同**：
+
+```text
+压缩      上下文太满了     →  同一条路径上，把前半截换成摘要
+分支摘要  你要跳到别处去   →  离开当前分支，把这一段的成果记下来
+```
+
+08 篇学过：`/tree` 跳转、fork、切换会话，本质都是移动 `leafId`。指针一移，刚才那一路干的活就**不在新路径上**了——不是被删除（树上永远留着），是不可见。
+
+```text
+        ┌─ C ─ D ─ E ←── 你现在在这（干了一堆活）
+   A ─ B
+        └─ F ─ G     ←── 你要跳到这
+```
+
+文件头注释：
+
+> 会话树导航到其他位置时，为**即将离开的分支**生成摘要，避免上下文丢失。
+
+#### 独有的第一步：找共同祖先
+
+压缩不需要这一步——它在一条直线上切一刀即可。分支摘要必须先算出两条路径的分岔点（`:131`）：
+
+```typescript
+export function collectEntriesForBranchSummary(session, oldLeafId, targetId): CollectEntriesResult {
+	if (!oldLeafId) return { entries: [], commonAncestorId: null };
+
+	const oldPath = new Set(session.getBranch(oldLeafId).map((e) => e.id));
+	const targetPath = session.getBranch(targetId);
+
+	let commonAncestorId: string | null = null;
+	for (let i = targetPath.length - 1; i >= 0; i--) {     // targetPath 从根排列，反向找最深的
+		if (oldPath.has(targetPath[i].id)) { commonAncestorId = targetPath[i].id; break; }
+	}
+
+	const entries: SessionEntry[] = [];
+	let current: string | null = oldLeafId;
+	while (current && current !== commonAncestorId) {       // ★ 又是那个父链遍历
+		const entry = session.getEntry(current);
+		if (!entry) break;
+		entries.push(entry);
+		current = entry.parentId;
+	}
+	entries.reverse();                                      // 转成时间顺序
+	return { entries, commonAncestorId };
+}
+```
+
+用上图走一遍：
+
+```text
+oldPath    = { A, B, C, D, E }
+targetPath = [A, B, F, G]        ← 从根排列
+反向遍历：G ∉ oldPath → F ∉ oldPath → B ∈ oldPath ✓  →  commonAncestorId = B
+从 E 回溯到 B（不含）：[E, D, C] → reverse → [C, D, E]
+```
+
+**这就是"要摘要的那一段"。** 09 篇 3.1 讲的那个 `while (current)` 父链遍历，在这里又出现一次——只是终点从 `undefined` 换成了 `commonAncestorId`。
+
+#### 同一个问题，两个相反的答案
+
+注释特意点出：
+
+> 遇到压缩边界时**不会停止**，因为这些边界也会被纳入，其摘要将成为上下文的一部分。
+
+对比压缩自己的处理（`compaction.ts:87`）：
+
+```typescript
+function getMessageFromEntryForCompaction(entry: SessionEntry): AgentMessage | undefined {
+	if (entry.type === "compaction") return undefined;    // ★ 压缩条目不参与再摘要
+	// 压缩条目本身只是历史边界，不能再次作为普通消息并入下一轮摘要。
+}
+```
+
+而分支摘要的版本（`branch-summarization.ts:187`，注释写着 `but also handles compaction entries`）会把它转成 `compactionSummary` 消息一并摘要。
+
+| | 压缩 | 分支摘要 |
+|---|---|---|
+| 压缩条目怎么办 | **跳过** | **纳入** |
+| 理由 | 它是当前路径的**活边界**，再摘要会套娃 | 离开之后这条边界也失效，它只是这段历史的一部分 |
+
+**同一条压缩摘要，是"活的边界"还是"一段历史"，取决于你打算留在这条路上还是离开。**
+
+#### 工具结果：截断 vs 直接丢弃
+
+```typescript
+case "message":
+	if (entry.message.role === "toolResult") return undefined;   // 直接丢
+	// 跳过工具结果，其上下文已包含在助手的工具调用中。
+```
+
+对比 4.8：压缩把工具结果**截到 2000 字符保留**。
+
+**因为两者要回答的问题不同：**
+
+```text
+压缩摘要   ——  同一条路上要接着干  ——  需要"依据"（上次读那个文件看到了什么）
+分支摘要   ——  离开这条路          ——  只需要"结论"（试了什么、行不行）
+```
+
+工具调用本身（`read(path="x")`）已经说明做过什么，结果内容对"日后回来看一眼"没有价值。
+
+#### 复用了什么、独有什么
+
+看 import 就一目了然：
+
+```typescript
+import { completeSummarization, estimateTokens } from "./compaction.ts";
+import { computeFileLists, createFileOps, extractFileOpsFromMessage,
+         formatFileOperations, SUMMARIZATION_SYSTEM_PROMPT, serializeConversation } from "./utils.ts";
+```
+
+| 共用 | 独有 |
+|---|---|
+| `completeSummarization`（无缓存 / 新 sessionId / 可重试） | `collectEntriesForBranchSummary`（找共同祖先） |
+| `SUMMARIZATION_SYSTEM_PROMPT`（`Do NOT continue`） | `getMessageFromEntry`（对压缩条目与工具结果的不同处理） |
+| `serializeConversation`（拍平成转录稿） | `BRANCH_SUMMARY_PROMPT`（第四套模板） |
+| 文件操作那一整套 | `prepareBranchEntries`（带 `tokenBudget` 的裁剪） |
+| `convertToLlm` | |
+
+**`utils.ts` 存在的意义就在这一栏**——它装的正是"压缩与分支摘要都要用"的东西。这也回答了 4.8 的一个小疑问：`serializeConversation` 为什么在 `utils.ts` 而不在 `compaction.ts`。
+
+#### 第四套提示词
+
+```typescript
+// branch-summarization.ts:306
+const BRANCH_SUMMARY_PROMPT = `Create a structured summary of this conversation branch for context when returning later. …`;
+```
+
+至此摘要提示词共四套：
+
+| 提示词 | 用在哪 | 回答什么 |
+|---|---|---|
+| `SUMMARIZATION_PROMPT` | 首次压缩 | 这段历史干了什么（七段模板） |
+| `UPDATE_SUMMARIZATION_PROMPT` | 后续压缩 | 把新进展合并进旧摘要 |
+| `TURN_PREFIX_SUMMARIZATION_PROMPT` | split turn | 被切断那半轮发生了什么 |
+| `BRANCH_SUMMARY_PROMPT` | 分支摘要 | 这条分支试了什么，**以便日后回来** |
+
+`for context when returning later` 这句定位是关键——**它假设你可能会回来**，所以侧重"试过什么、结果如何"，而不是压缩摘要那种"接着干的交接文档"。
+
+**四套提示词，四种读者处境。** 同样是让模型总结，期待的产物形态完全不同。
+
+#### 一个多出来的参数
+
+```typescript
+export function prepareBranchEntries(entries: SessionEntry[], tokenBudget: number = 0): BranchPreparation
+```
+
+分支摘要多了 `tokenBudget`——**要摘要的分支可能任意长**（你在上面干了一整天），而压缩至少有 `keepRecentTokens` 划出的范围。有预算就要裁剪。
+
+⬜ 裁剪策略（裁哪头、怎么取舍）本篇未跟。
+
+---
+
+## 第 8 章 工程模式清单
 
 1. **快照决定了改动必须发生在哪一层。** `createContextSnapshot()` 的 `.slice()` 让循环持有副本；想让改动生效只能结束这次 run 再重开——"压缩在循环外"不是偏好而是必然。
 2. **一层一个"一次"。** 回合 ⊇ run ⊇ turn ⊇ 请求 ⊇ 事件；说清楚在哪一层做，比说清楚做什么更重要。
@@ -1270,10 +1554,17 @@ if (this._extensionRunner && savedCompactionEntry) {
 31. **知道缓存命中不了就别写。** 摘要请求前缀独一无二，`cacheRetention: "none"`——写缓存要花钱，读却永远读不到。
 32. **昂贵操作值得重试，但只重试瞬时失败。** 压缩已算完切点、可能已发过轮前缀请求，不该因一次 socket 抖动全废；确定性错误立即返回。
 33. **不是所有错误都能折成数据。** 工具失败变 `toolResult` 让模型自纠，摘要失败只能 `throw`——没有摘要就无法继续，这不是模型能处理的问题。
+34. **核心一份，外壳按调用者的期待包。** 自动与手动压缩共用九成代码；差异全来自"谁在等"——无人值守则静默返回 boolean，用户在等则抛出带诊断的错误并交付结果对象。
+35. **控制器按来源分设，取消时一起打。** 自动与手动压缩可能并存，故各有各的 `AbortController`；但用户按 Esc 的意思是"全停"。
+36. **"被取消"不是"失败了"。** 事件里分成 `aborted` 与 `errorMessage` 两个字段，取消不填错误——用户自己的选择不该弹报错。
+37. **事件是通知，异常是控制流。** 手动压缩 `emit` 之后仍要 `throw`，两条路各走各的。
+38. **同一份数据的取舍取决于读者处境。** 压缩条目在压缩里被跳过（活边界，再摘要会套娃），在分支摘要里被纳入（离开后只是一段历史）；工具结果在压缩里截断保留（还要接着干，需要依据），在分支摘要里直接丢弃（只需结论）。
+39. **共用的东西沉到公共文件。** `utils.ts` 装的正是压缩与分支摘要都要用的部分——这是判断"该不该抽出来"的现成标准。
+40. **同一动作、多套提示词。** 四套摘要提示词对应四种读者处境；模板的差别不在措辞而在"读它的人接下来要干什么"。
 
 ---
 
-## 第 8 章 复习自测
+## 第 9 章 复习自测
 
 1. 压缩发生在哪个文件、哪一层？为什么**不能**放在 agent 循环内部？（快照那条理由）
 2. 三份 `messages` 分别在哪、寿命多长？压缩要让哪几份依次更新？
@@ -1315,7 +1606,20 @@ if (this._extensionRunner && savedCompactionEntry) {
 38. 压缩生效的三行代码分别做了什么？之后靠什么让 agent-loop 拿到新上下文？
 39. `estimatedTokensAfter` 为什么只能估？它参与判定吗？
 40. `session_before_compact` 与 `session_compact` 有何不同？后者为什么传"已保存的条目"？
+41. 手动 `/compact` 与自动压缩共用哪些步骤？差异全部源于什么？
+42. 手动压缩开场为什么要 `_disconnectFromAgent()` + `abort()`？自动压缩为什么不用？
+43. 为什么两种压缩各有一个 `AbortController`，取消时却一起打？
+44. 同样是"压不动"，两条路的反应为何相反？手动那边还多做了什么？
+45. 两个函数的返回类型分别是什么？这说明了什么？
+46. `customInstructions` 为什么只有手动才有？
+47. 事件里为什么要把 `aborted` 和 `errorMessage` 分开？判据有哪两个来源？
+48. 分支摘要解决的问题和压缩有何根本不同？
+49. `collectEntriesForBranchSummary` 怎么找共同祖先？用 A-B-C-D-E / A-B-F-G 那棵树走一遍。
+50. 压缩条目在两种摘要里被区别对待——分别怎么处理、理由是什么？
+51. 工具结果在压缩里截断保留、在分支摘要里直接丢弃，判据是什么？
+52. `utils.ts` 里放的是哪一类东西？这给"该不该抽公共文件"提供了什么标准？
+53. 四套摘要提示词分别用在哪、回答什么问题？它们的差别本质上是什么差别？
 
 ---
 
-> **接下来**：手动 `/compact` 的完整路径（入口、交互、与自动压缩共用哪些代码），以及 `branch-summarization.ts`（431 行，与压缩共用基础设施）。
+> **压缩这条线到此走完。** 仅剩 `prepareBranchEntries` 的 `tokenBudget` 裁剪策略未跟（7.2 末尾已标注）。
