@@ -1,12 +1,12 @@
-# 09 — 从会话历史到 LLM 请求：上下文组装链路
+# 02 — 从会话历史到 LLM 请求：上下文组装链路
 
-> 学习系列第 9 篇（全景地图见第 0 篇，会话树见第 8 篇）。第 8 篇讲清了会话在磁盘与内存里长什么**形状**——一棵 append-only 的事件树。本篇接着问下一个问题：**这棵树上的一条路径，是怎么一步步变成发给 LLM 的那串消息的？**
+> 学习系列第 2 篇（全景见 `generated/全景地图`，会话树见 01 篇）。01 篇讲清了会话在磁盘与内存里长什么**形状**——一棵 append-only 的事件树。本篇接着问下一个问题：**这棵树上的一条路径，是怎么一步步变成发给 LLM 的那串消息的？**
 >
 > 这是一条分工明确的流水线，本篇**从头走到尾**：前半段（第 1–8 章）是 `packages/coding-agent/src/core/session-manager.ts` 里 6 个**纯函数**如何把「当前 leaf 路径」组装成 `AgentMessage[]`；后半段（第 9–12 章）是 `transformContext()` / `convertToLlm()` 如何把 `AgentMessage` 塌缩成中立的 `Message`，再由各家 provider 译成真正的 HTTP 报文。
 >
-> 只覆盖**"出去"的方向**。响应流回来之后（SSE 解析 → `AssistantMessage` → 落盘成新条目 → 下一轮）属于第 1、2 篇的范围，本篇不重走。
+> 只覆盖**"出去"的方向**。响应流回来之后（SSE 解析 → `AssistantMessage` → 落盘成新条目 → 下一轮）属于 03 篇的范围，本篇不重走。
 >
-> 所有 `文件:行号` 基于 commit `859bd29bd`。核心文件三个：`session-manager.ts`（约 1850 行，前半段）、`core/messages.ts`（后半段的塌缩逻辑）、`packages/agent/src/agent-loop.ts`（两段之间的交接点）。与第 8 篇同一套代码，本篇聚焦其"读侧"——从树到上下文的组装，而非第 8 篇的"写侧"——落盘与建树。
+> 所有 `文件:行号` 基于 commit `859bd29bd`。核心文件三个：`session-manager.ts`（约 1850 行，前半段）、`core/messages.ts`（后半段的塌缩逻辑）、`packages/agent/src/agent-loop.ts`（两段之间的交接点）。与 01 篇同一套代码，本篇聚焦其"读侧"——从树到上下文的组装，而非 01 篇的"写侧"——落盘与建树。
 
 ## 目录
 
@@ -73,7 +73,7 @@ entries[] (磁盘 JSONL 的内存投影，全量事实) + leafId
 | `sessionEntryToContextMessages` | 单个条目投影成 0~N 条消息 | **类型** | 423 |
 | `buildSessionContext` | 总装配线，串起以上 | — | 508 |
 
-一个贯穿全篇、也贯穿整个系列的心智模型（从第 8 篇延续）：
+一个贯穿全篇、也贯穿整个系列的心智模型（从01 篇延续）：
 
 > **事实层 vs 投影层。** `entries[]` 是事实——全量、不可变、只追加。`SessionContext` 是投影——当前这条路径的一个可裁剪切片。这条流水线，本质就是一个把「事实」算成「投影」的**纯函数**。改 leaf、压缩、分支，都只是"换一种投影方式"，事实本身一个字节不动。
 
@@ -269,14 +269,14 @@ idx  条目                          说明
  8   a4  (assistant)   ← leaf     压缩之后新说的
 ```
 
-一个**关键前提**：`firstKeptEntryId` 不是这个函数算的。它是**上一次压缩发生时**由压缩算法（`findCutPoint`，见第 8 篇第 8 章）定下的"分界线 id"——线后保留原文，线前进摘要。`buildContextEntries` 只**消费**这条线，不计算它。分清"谁画线（压缩时）"和"谁用线（组装时）"很重要。
+一个**关键前提**：`firstKeptEntryId` 不是这个函数算的。它是**上一次压缩发生时**由压缩算法（`findCutPoint`，见01 篇第 8 章）定下的"分界线 id"——线后保留原文，线前进摘要。`buildContextEntries` 只**消费**这条线，不计算它。分清"谁画线（压缩时）"和"谁用线（组装时）"很重要。
 
 再记住一处错位：**`COMP` 在 path 里排在 idx 6（保留区之后）**，因为它是压缩那一刻**追加**上去的、较晚的节点。这解释了 488 行。
 
 逐块走：
 
 - **① 找"最新"compaction（473–477）**：正向遍历，每遇到一个就覆盖 `compaction` 变量，所以最后拿到的是**路径上最靠后（最新）的**那个。
-- **② 短路①：没压缩就原样返回（479）**：**这一行就是第 8 篇说的"可逆性"落点**。你 `/tree` 跳回压缩点**之前**开分支，新路径不经过任何 compaction，走这个 `return`，全量原文自动回来——可逆不是额外写的功能，是这个 `if` 的自然结果。
+- **② 短路①：没压缩就原样返回（479）**：**这一行就是01 篇说的"可逆性"落点**。你 `/tree` 跳回压缩点**之前**开分支，新路径不经过任何 compaction，走这个 `return`，全量原文自动回来——可逆不是额外写的功能，是这个 `if` 的自然结果。
 - **③ 定位 + 防御（483–486）**：`compactionIdx = 6`。`< 0` 理论上不可能（COMP 就是从 path 里挑出来的），仍写防御——"不信任上一步结果"的风格。
 - **④ 第一段：摘要提到最前（488）**：`[COMP]`。树上 COMP 在 idx 6，这里却提到数组第 0 位——**让模型先读"前情提要"再读近期原文，按叙事逻辑排，不按文件顺序排**。
 - **⑤ 第二段：挑保留区（490–498）**：用开关 `foundFirstKept` 扫 idx 0–5。对着例子：
@@ -336,7 +336,7 @@ context:   [  COMP  ] [a2 u3 a3]        [u4 a4]
 
 第二个容易看岔的地方：摘要覆盖的范围和保留区**在时间上不相交**，所以摘要提到最前不会和保留区"内容交叉"。
 
-保证来自压缩那一侧（`compaction.ts:782`，详见第 8 篇 8.1）：摘要范围是 `[boundaryStart, historyEnd)`，保留区是 `[firstKeptEntryIndex, ...)`，**前者的开区间上界正好是后者的下界**，半开区间一刀两断。多轮压缩靠 `boundaryStart = 上一次的 firstKeptEntryIndex` 接力（`compaction.ts:761`），于是：
+保证来自压缩那一侧（`compaction.ts:782`，详见01 篇 8.1）：摘要范围是 `[boundaryStart, historyEnd)`，保留区是 `[firstKeptEntryIndex, ...)`，**前者的开区间上界正好是后者的下界**，半开区间一刀两断。多轮压缩靠 `boundaryStart = 上一次的 firstKeptEntryIndex` 接力（`compaction.ts:761`），于是：
 
 ```text
 [摘要① 覆盖 0-2][摘要② 覆盖 3-7][原文尾巴 8-]
@@ -467,7 +467,7 @@ if (sessionEntryToContextMessages(entry).some(isCutPointMessage)) cutPoints.push
 
 关键在于压缩**没有自己重新判断一遍 `entry.type`**。它算的是 token **预算**，而预算属于"投影之后的世界"——一条 `model_change` 在文件里占几十字节，在上下文里占 0 token，**只有投影函数知道这件事**。若压缩自己维护一份"哪些类型不占 token"的清单，新增 entry 类型时两处都要改，漏一处切点就偏了。
 
-**一句话：投影函数是"entry 在上下文里长什么样"这个知识的唯一持有者，谁想知道就来问它，而不是自己猜。**（对照第 8 篇 8.1 —— 那三处调用正是切点算法的地基。）
+**一句话：投影函数是"entry 在上下文里长什么样"这个知识的唯一持有者，谁想知道就来问它，而不是自己猜。**（对照01 篇 8.1 —— 那三处调用正是切点算法的地基。）
 
 ---
 
@@ -497,7 +497,7 @@ function getSessionContextSettings(path: SessionEntry[]): Pick<SessionContext, "
 
 两个细节：`model` 有两个来源——显式的 `model_change` 条目，以及 assistant 消息**自带**的 `provider/model`；都会更新 `model`，取路径上最后一个。所以即便没有 `model_change` 条目，最后一条 assistant 用的模型也会被认作"当前模型"。
 
-这又是一个"**配置即事件、状态靠重放**"的实例——和第 8 篇里 label 的重放、leafId 的推进同源。设置不是存在某个字段里，而是散落在树上的一串 change 事件，用的时候重放路径取最新。
+这又是一个"**配置即事件、状态靠重放**"的实例——和01 篇里 label 的重放、leafId 的推进同源。设置不是存在某个字段里，而是散落在树上的一串 change 事件，用的时候重放路径取最新。
 
 ---
 
@@ -782,7 +782,7 @@ if (options?.temperature !== undefined && !options?.thinkingEnabled && compat.su
 
 ```text
 .jsonl 各行
-   │ 解析 + 重放（第 8 篇）
+   │ 解析 + 重放（01 篇）
    ▼
 SessionEntry[]                    树，全量事实
    │ buildSessionPath             选路径          （第 3 章）
@@ -876,4 +876,4 @@ HTTP body
 
 ---
 
-*基于 2026-08-14 / 08-15 的源码精读整理（对话式逐行走读）。上承第 8 篇（会话树的形状）。本篇只覆盖"出去"的方向；响应流回来之后（SSE 解析 → `AssistantMessage` → 落盘 → 下一轮）见第 1、2 篇。`systemPrompt` 与 `tools` 这两条支流各自怎么攒出来，见第 3 篇（提示词六道关卡）与第 5 篇（扩展注册工具）。配套阅读：`docs-zh/coding-agent/compaction.md`（压缩细节）。*
+*基于 2026-08-14 / 08-15 的源码精读整理（对话式逐行走读）。上承01 篇（会话树的形状）。本篇只覆盖"出去"的方向；响应流回来之后（SSE 解析 → `AssistantMessage` → 落盘 → 下一轮）见 03 篇。`systemPrompt` 与 `tools` 这两条支流各自怎么攒出来，见 05 篇（提示词与工具的汇合）与 04 篇（扩展注册工具）。配套阅读：`docs-zh/coding-agent/compaction.md`（压缩细节）。*

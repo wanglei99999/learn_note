@@ -1,8 +1,8 @@
-# 08 — 会话树与上下文管理：从一个 JSONL 文件到 LLM 上下文
+# 01 — 会话树与上下文管理：从一个 JSONL 文件到 LLM 上下文
 
-> 学习系列第 8 篇（全景地图见第 0 篇，agent 运行时见第 1 篇）。本篇沿着一次真实的动手实验，完整走通 pi 的会话持久化链路：**磁盘上的 JSONL 文件 → 内存投影 → 会话树 → 当前路径 → 发给 LLM 的上下文**，覆盖分支、标签、压缩（compaction）、`!` 命令注入等全部会话机制。
+> 学习系列第 1 篇（全景见 `generated/全景地图`，agent 运行时见 `generated/agent`）。本篇沿着一次真实的动手实验，完整走通 pi 的会话持久化链路：**磁盘上的 JSONL 文件 → 内存投影 → 会话树 → 当前路径 → 发给 LLM 的上下文**，覆盖分支、标签、压缩（compaction）、`!` 命令注入等全部会话机制。
 >
-> 所有 `文件:行号` 基于 commit `c728df8dc`（v0.83.0），核心文件是 `packages/coding-agent/src/core/session-manager.ts`（约 1850 行）。注意它与第 1 篇讲的 `packages/agent/src/harness/session/` 是两套平行实现——本篇讲的是 `pi` CLI 实际使用的这套。
+> 所有 `文件:行号` 基于 commit `c728df8dc`（v0.83.0），核心文件是 `packages/coding-agent/src/core/session-manager.ts`（约 1850 行）。注意它与 `generated/agent` 讲的 `packages/agent/src/harness/session/` 是两套平行实现——本篇讲的是 `pi` CLI 实际使用的这套。
 
 ## 目录
 
@@ -70,7 +70,7 @@ pi 的会话机制可以压缩成一句话：**磁盘上是只追加的事件日
 | `branch_summary` | 分支摘要 | `/tree` 跳转时选 "Summarize" 产生 |
 | `session_info` | 会话重命名 | 入口：`/name`、CLI `--name`、`-r` 选择器内改名、扩展 API。最后一条胜出，见 4.5 |
 
-另有扩展专用的 `custom` / `custom_message` 条目（`:115-162`），属第 5 篇（扩展）的领域，此处从略。
+另有扩展专用的 `custom` / `custom_message` 条目（`:115-162`），属 04 篇（扩展装配线）的领域，此处从略。
 
 一次真实会话的树（来自动手实验，`★` 处有两个孩子即分支点）：
 
@@ -394,7 +394,7 @@ const historyEnd = cutPoint.isSplitTurn ? cutPoint.turnStartIndex : cutPoint.fir
 for (let i = boundaryStart; i < historyEnd; i++) { … }   // :782
 ```
 
-切点是 6 时，`i < 6` 自然停在 5——"5"是 `6 - 1` 的副产品，从没被算过。半开区间的好处：**一个数同时是"摘要的终点"和"保留区的起点"**，不可能出现缝隙或重叠（这正是第 9 篇 4.2 "拼图不是图层"的来源）。
+切点是 6 时，`i < 6` 自然停在 5——"5"是 `6 - 1` 的副产品，从没被算过。半开区间的好处：**一个数同时是"摘要的终点"和"保留区的起点"**，不可能出现缝隙或重叠（这正是02 篇 4.2 "拼图不是图层"的来源）。
 
 **③ 吸附切点时只往后挪，绝不往前。**
 
@@ -469,7 +469,7 @@ for (let c = 0; c < cutPoints.length; c++) {
 
 落盘形态是 `role: "bashExecution"` 的消息条目——**既不是 user 也不是 assistant**，而是 coding-agent 通过声明合并（declaration merging）扩展 `AgentMessage` 得到的自定义消息类型（机制见 `packages/agent` README "Custom Message Types"）。条目带 `excludeFromContext` 字段：`!` 为 false，`!!` 为 true。
 
-这类消息进入 LLM 前经过第 1 篇讲过的管道过滤转换：
+这类消息进入 LLM 前经过 `generated/agent` 讲过的管道过滤转换：
 
 ```text
 AgentMessage[] → transformContext() → convertToLlm() → Message[] → LLM
@@ -524,4 +524,4 @@ AgentMessage[] → transformContext() → convertToLlm() → Message[] → LLM
 
 ---
 
-*基于 2026-08-02 的动手实验与源码走读整理；2026-08-03 增补 2.4、4.4、4.5、7.1 并修正 3.1（`-c`/`-r` 误记）。配套阅读：`docs-zh/coding-agent/session-format.md`（文件格式）、`docs-zh/coding-agent/sessions.md`（用户侧操作）、`docs-zh/coding-agent/compaction.md`（压缩细节）、第 1 篇第 8 章（agent 包的平行实现）。*
+*基于 2026-08-02 的动手实验与源码走读整理；2026-08-03 增补 2.4、4.4、4.5、7.1 并修正 3.1（`-c`/`-r` 误记）。配套阅读：`docs-zh/coding-agent/session-format.md`（文件格式）、`docs-zh/coding-agent/sessions.md`（用户侧操作）、`docs-zh/coding-agent/compaction.md`（压缩细节）、`generated/agent` 第 8 章（agent 包的平行实现）。*

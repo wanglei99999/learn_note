@@ -1,18 +1,18 @@
-# 11 — 从磁盘文件到可调用的工具：扩展装配线
+# 04 — 从磁盘文件到可调用的工具：扩展装配线
 
-> 学习系列第 11 篇。08/09/10 三篇跟完了 `messages` 那条支流（树 → 路径 → 消息 → 报文 → 回来 → 落盘）。但 `Context` 是三个字段：
+> 学习系列第 4 篇。01/02/03 三篇跟完了 `messages` 那条支流（树 → 路径 → 消息 → 报文 → 回来 → 落盘）。但 `Context` 是三个字段：
 >
 > ```typescript
 > export interface Context {
 > 	systemPrompt?: string;   // ← 没跟过
-> 	messages: Message[];     // ← 09（出去）+ 10（回来）跟完了
+> 	messages: Message[];     // ← 02（出去）+ 03（回来）跟完了
 > 	tools?: Tool[];          // ← 没跟过
 > }
 > ```
 >
 > 剩下两条的源头是同一套东西：**extension / skill / prompt / theme 的加载**。本篇跟 extension 这一条，路径是：**磁盘上的一个 `.ts` 文件 → 模型能调用的工具**。
 >
-> 与 05 篇的关系：05 篇是**参考手册**（事件目录、上下文对象、快捷键仲裁、两个官方案例），按模块组织；本篇是**路径视角**，只跟一条数据流，实现细节挂在路径段下。两篇互补，不重复的部分请看 05。
+> 与 `generated/extensions` 的关系：那篇是**参考手册**（事件目录、上下文对象、快捷键仲裁、两个官方案例），按模块组织；本篇是**路径视角**，只跟一条数据流，实现细节挂在路径段下。两篇互补，不重复的部分请看那篇。
 >
 > 所有 `文件:行号` 基于 commit `859bd29bd`。核心文件两个：`packages/coding-agent/src/core/extensions/loader.ts`（发现 + 加载）、`runner.ts`（激活 + 派发）；汇合点在 `core/agent-session.ts`。
 
@@ -44,7 +44,7 @@ ResourceLoader.reload()                  systemPrompt 现拼
   ├─ 扫描 skill                                  ↓
   ├─ 加载 prompt template                Context { systemPrompt, messages, tools }
   ├─ 加载 theme                                  ↑
-  └─ 读 AGENTS.md / CLAUDE.md              09/10 篇讲的就是这条
+  └─ 读 AGENTS.md / CLAUDE.md              09/03 篇讲的就是这条
        ↑
    本篇在这条线上
 ```
@@ -461,7 +461,7 @@ extension.tools.set(tool.name, {
 });
 ```
 
-典型的**包装模式**：你的对象整个塞进 `definition`，外面套一层记"这东西哪来的"。将来界面要显示"该工具来自哪个扩展"、出错要指出是谁的锅，靠的就是这层。跟 09 篇的"外来对象整体存，自家字段拆开存"是同一判据——`definition` 的 schema 归你，`sourceInfo` 归 pi。
+典型的**包装模式**：你的对象整个塞进 `definition`，外面套一层记"这东西哪来的"。将来界面要显示"该工具来自哪个扩展"、出错要指出是谁的锅，靠的就是这层。跟 02 篇的"外来对象整体存，自家字段拆开存"是同一判据——`definition` 的 schema 归你，`sourceInfo` 归 pi。
 
 **③ 没注册的是空 Map，不是 `undefined`。** `createExtension` 一律预填 `new Map()`，所以上层汇总时可以无脑遍历，不用到处判空。
 
@@ -952,4 +952,4 @@ registerTool(tool) {
 
 ---
 
-> **下一段**：`systemPrompt` 和 `tools` 怎么真正进 `Context`——`_refreshToolRegistry` 的结算规则、系统提示词的拼装顺序，以及 skill / prompt / theme 是不是同一套加载规则。跟完那段，`Context` 三个字段的源头就全通了，本系列 08–09–10–11 也就闭环回到了 09 篇的起点。
+> **下一段**：`systemPrompt` 和 `tools` 怎么真正进 `Context`——`_refreshToolRegistry` 的结算规则、系统提示词的拼装顺序，以及 skill / prompt / theme 是不是同一套加载规则。跟完那段，`Context` 三个字段的源头就全通了，本系列 01–02–03–04 也就闭环回到了 02 篇的起点。
