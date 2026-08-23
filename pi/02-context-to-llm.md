@@ -6,7 +6,7 @@
 >
 > 只覆盖**"出去"的方向**。响应流回来之后（SSE 解析 → `AssistantMessage` → 落盘成新条目 → 下一轮）属于 03 篇的范围，本篇不重走。
 >
-> 所有 `文件:行号` 基于 commit `859bd29bd`。核心文件三个：`session-manager.ts`（约 1850 行，前半段）、`core/messages.ts`（后半段的塌缩逻辑）、`packages/agent/src/agent-loop.ts`（两段之间的交接点）。与 01 篇同一套代码，本篇聚焦其"读侧"——从树到上下文的组装，而非 01 篇的"写侧"——落盘与建树。
+> 所有 `文件:行号` 已重定位到 **v0.84.2**（`5cd93f688`）。核心文件三个：`session-manager.ts`（约 1530 行，前半段）、`core/messages.ts`（后半段的塌缩逻辑）、`packages/agent/src/agent-loop.ts`（两段之间的交接点）。与 01 篇同一套代码，本篇聚焦其"读侧"——从树到上下文的组装，而非 01 篇的"写侧"——落盘与建树。
 
 ## 目录
 
@@ -77,7 +77,7 @@ entries[] (磁盘 JSONL 的内存投影，全量事实) + leafId
 
 > **事实层 vs 投影层。** `entries[]` 是事实——全量、不可变、只追加。`SessionContext` 是投影——当前这条路径的一个可裁剪切片。这条流水线，本质就是一个把「事实」算成「投影」的**纯函数**。改 leaf、压缩、分支，都只是"换一种投影方式"，事实本身一个字节不动。
 
-这也决定了本篇 6 个函数的一个共同特征：**它们全是模块级纯函数**（不依赖 `SessionManager` 实例状态，输入全靠参数进），`SessionManager` 上的同名方法只是薄薄一层转发（例如 `session-manager.ts:1366`）。纯函数好测试、好复用，这是整套设计能保持简单的根基。
+这也决定了本篇 6 个函数的一个共同特征：**它们全是模块级纯函数**（不依赖 `SessionManager` 实例状态，输入全靠参数进），`SessionManager` 上的同名方法只是薄薄一层转发（例如 `session-manager.ts:1276`）。纯函数好测试、好复用，这是整套设计能保持简单的根基。
 
 ---
 
@@ -192,31 +192,40 @@ A (root, parentId=null)
 
 | 实现 | 断链（parentId 指向不存在的条目） | 父链成环 |
 | --- | --- | --- |
-| `session-manager.ts:392`（本章） | 静默停止，返回残缺路径 | 不防（会死循环） |
-| `array-session-reader.ts:99-101` | `throw SessionError("invalid_session")` | 不防 |
-| `sqlite-node/.../storage/index.ts:237-245` | `throw SessionError("invalid_session")` | `visited` 集合，成环即 `throw` |
+| `session-manager.ts:354`（本章，pi CLI 这套） | 静默停止，返回残缺路径 | 不防 |
+| `state.ts:315-318`（agent harness 内存实现） | `throw SessionError("invalid_entry")` | `visited` 集合，成环即 `throw`（310-313） |
+| `branch-entries.ts:138-144`（SQLite 后端） | `throw SessionError("invalid_entry")` | `seen` 集合，成环即 `throw`（139） |
 
 ```typescript
-// array-session-reader.ts:99-101 —— 把"到根"和"断链"拆成两种结局
-if (!current.parentId) break;                       // 到根：正常收工
-const parent = byId.get(current.parentId);
-if (!parent) throw new SessionError("invalid_session", `Entry ${current.parentId} not found`);
+// state.ts:310-318 —— 防环、到根、断链，三种结局都写明
+if (visited.has(current.id)) {
+	throw new SessionError("invalid_entry", `Session branch contains a cycle at ${current.id}`);
+}
+visited.add(current.id);
+yield current;
+if (current.id === bounds?.stopAtId || current.type === bounds?.stopAtType || current.parentId === null) break;
+const parentId: string = current.parentId;
+current = this.entriesById.get(parentId);
+if (!current) throw new SessionError("invalid_entry", `Entry not found: ${parentId}`);
 ```
 
 ```typescript
-// sqlite/storage/index.ts:237-240 —— 多防一手环
-const visited = new Set<string>();
-while (current) {
-	if (visited.has(current.id)) throw invalidSession(`cycle in parent chain at entry ${current.id}`);
-	visited.add(current.id);
+// branch-entries.ts:138-144 —— SQLite 侧同样的两道防线
+while (entryId !== null) {
+	if (seen.has(entryId)) throw new SessionError("invalid_entry", `Entry parent cycle at ${entryId}`);
+	seen.add(entryId);
+	const row: BranchPathEntryRow | undefined = sql`...`.get<BranchPathEntryRow>(db);
+	if (!row) throw new SessionError("invalid_entry", `Entry ${entryId} not found`);
 ```
 
 差异不是随手写的，而是**数据来源的可信度不同**：
 
 - `session-manager` 的 `index` 是它自己刚从 `.jsonl` 一次性重放建起来的，append-only 不变量在同一个进程里刚被它亲手维护过——上面"不需要防环"的论证在这里成立。
-- SQLite 那份面对的是一个**可能被外部进程改写**的数据库文件。append-only 不变量在进程外不受它控制，于是不变量降级成"待验证的假设"，防御代码就必须补回来。
+- 另外两份都不掌管数据的产生：harness 的 `state.ts` 要面对**可插拔的 session 后端**，SQLite 那份面对的是一个**可能被外部进程改写**的数据库文件。append-only 不变量出了自己的进程就不再受控，于是不变量降级成"待验证的假设"，防御代码必须补回来。
 
 **一句话：不变量能省掉防御代码，但只在不变量的作用域之内。跨过信任边界，省掉的都要还回来。**
+
+> **修订（2026-08-23，v0.84.2）**：本节初版写的是「harness 那份也不防环，只有 SQLite 防」，据此把三份实现排成"一次比一次严"的梯度。上游重构 session 层后事实变了：`array-session-reader.ts` 已删除，等价逻辑搬到 `state.ts`，并且**自己补上了防环**；SQLite 侧的防环从 `storage/index.ts` 搬到 `storage/branch-entries.ts`，`visited` 改名 `seen`；两处错误码都从 `invalid_session` 统一成了 `invalid_entry`。梯度因此从三级变成两级——**掌管数据产生的那一份可以省，其余都要补**——但"防御范围跟着信任边界走"这个论点本身没变，反而更清楚了。
 
 ---
 
@@ -336,7 +345,7 @@ context:   [  COMP  ] [a2 u3 a3]        [u4 a4]
 
 第二个容易看岔的地方：摘要覆盖的范围和保留区**在时间上不相交**，所以摘要提到最前不会和保留区"内容交叉"。
 
-保证来自压缩那一侧（`compaction.ts:782`，详见01 篇 8.1）：摘要范围是 `[boundaryStart, historyEnd)`，保留区是 `[firstKeptEntryIndex, ...)`，**前者的开区间上界正好是后者的下界**，半开区间一刀两断。多轮压缩靠 `boundaryStart = 上一次的 firstKeptEntryIndex` 接力（`compaction.ts:761`），于是：
+保证来自压缩那一侧（`compaction.ts:773`，详见01 篇 8.1）：摘要范围是 `[boundaryStart, historyEnd)`，保留区是 `[firstKeptEntryIndex, ...)`，**前者的开区间上界正好是后者的下界**，半开区间一刀两断。多轮压缩靠 `boundaryStart = 上一次的 firstKeptEntryIndex` 接力（`compaction.ts:758`），于是：
 
 ```text
 [摘要① 覆盖 0-2][摘要② 覆盖 3-7][原文尾巴 8-]
@@ -348,16 +357,20 @@ context:   [  COMP  ] [a2 u3 a3]        [u4 a4]
 
 ### 4.3 另一份实现：`retainedTail`
 
-`array-session-reader.ts:95-98` 处理压缩边界的方式和本章不同，值得对照记一笔：
+harness 那套处理压缩边界的方式和本章不同，值得对照记一笔。它把 compaction 条目直接投影成「摘要消息 + 保留下来的尾巴」，`session/context.ts:75-80`：
 
 ```typescript
-if (current.type === "compaction") {
-	if (current.retainedTail) break;
-	stopAtEntryId = current.firstKeptEntryId ?? null;
+if (entry.type === "compaction") {
+	return [
+		createCompactionSummaryMessage(entry.summary, entry.tokensBefore, entry.timestamp),
+		...entry.retainedTail,
+	];
 }
 ```
 
-它是**边爬树边处理压缩边界**（自 leaf 向根走，撞见 compaction 就把停止点设成 `firstKeptEntryId`），而本章是**先爬完整条路径、再裁剪**。`retainedTail` 这个字段在 `session-manager.ts` 那份实现里没有对应分支——两份实现对压缩边界的建模不完全一致，具体差异待查。
+差别在于**压缩边界记在哪**。本章这套（`session-manager.ts:445`）记的是一个**指针**：`firstKeptEntryId` 指向保留区的第一条，用时要回到树上把那段捞出来。harness 那套记的是**内容本身**：`retainedTail` 是已经实体化的 `AgentMessage[]`，压缩条目因此成为一个**自包含的检查点**——重建上下文时不必再回溯它之前的任何条目。
+
+> **修订（2026-08-23，v0.84.2）**：初版此处引用的是 `array-session-reader.ts:95-98`，并留了一句"两份实现对压缩边界的建模不完全一致，具体差异待查"。上游重构后该文件已删除，等价逻辑在 `session/context.ts`；待查的问题现在可以答了——**分工不同，不是实现分歧**：`retainedTail` 至今只存在于 `packages/agent`，`packages/coding-agent/src` 里一处都没有，pi CLI 这套仍然走 `firstKeptEntryId` 指针。容易被误导的是 `coding-agent/docs/session-format.md` 里也写了 `retainedTail`——那份文档描述的是 JSONL **格式全集**（谁写进去的都得能读），它自己的措辞"newer harness-generated compactions"已经点明了产出方是 harness。**读格式文档时要分清「这个字段谁会写」和「这个字段谁读得懂」。**
 
 ---
 
@@ -539,7 +552,7 @@ sessionEntryToContextMessages →  只按【类型】投影，完全不看条目
 
 ## 第 9 章 交接点：`agent-loop` 的二十行
 
-前八章的终点是 `buildSessionContext` 产出的 `AgentMessage[]`。它怎么变成 HTTP 请求体？全部交接动作压缩在 `packages/agent/src/agent-loop.ts:303-338` 一个函数里——`streamAssistantResponse`，**每轮要向模型要一次回复就跑一遍**：
+前八章的终点是 `buildSessionContext` 产出的 `AgentMessage[]`。它怎么变成 HTTP 请求体？全部交接动作压缩在 `packages/agent/src/agent-loop.ts:281-312` 一个函数里——`streamAssistantResponse`，**每轮要向模型要一次回复就跑一遍**：
 
 ```typescript
 async function streamAssistantResponse(context, config, signal, emit, streamFunction) {
@@ -571,7 +584,7 @@ async function streamAssistantResponse(context, config, signal, emit, streamFunc
 **① `convertToLlm` 是注入进来的，不是 `agent` 包自己的。**
 
 ```typescript
-// agent.ts:223
+// agent.ts:220
 this.convertToLlm = runtimeOptions.convertToLlm ?? defaultConvertToLlm;
 ```
 
@@ -586,7 +599,7 @@ this.convertToLlm = runtimeOptions.convertToLlm ?? defaultConvertToLlm;
 | `config.getApiKey` | **函数**，每轮现取 | 调用时（可能顺带刷新 token） |
 | `config.apiKey` | **字符串** | 装配 Agent 时定死 |
 
-动态那级是为 OAuth 准备的：access token 有有效期，可能这轮开始时还好、要发请求时已过期，所以不能装配阶段取一次存着。pi 填进去的实现在 `model-registry.ts:125`，`await this.runtime.getAuth(provider)` 里面藏着刷新逻辑——**那一下 `await` 可能真的发了一次 HTTP 请求**。
+动态那级是为 OAuth 准备的：access token 有有效期，可能这轮开始时还好、要发请求时已过期，所以不能装配阶段取一次存着。pi 填进去的实现在 `model-registry.ts:119`，`await this.runtime.getAuth(provider)` 里面藏着刷新逻辑——**那一下 `await` 可能真的发了一次 HTTP 请求**。
 
 两个细节值得记：用 `||` 而非 `??`，因为 `getApiKey` 返回空字符串时应当继续兜底（`"" ?? x` 会得到 `""`，拿着空串去发请求只会 401）；`getApiKeyForProvider` 内部 `catch { return undefined }` 而不抛错，正是为了**把决定权让给这个 `||`**——刷新失败还能退回静态密钥，抛出去则整轮直接崩。
 
@@ -596,7 +609,7 @@ this.convertToLlm = runtimeOptions.convertToLlm ?? defaultConvertToLlm;
 
 ## 第 10 章 `convertToLlm`：七种 role 塌缩成三种
 
-`packages/coding-agent/src/core/messages.ts:161`。一个 `switch` 干完全部工作：
+`packages/coding-agent/src/core/messages.ts:148`。一个 `switch` 干完全部工作：
 
 ```typescript
 export function convertToLlm(messages: AgentMessage[]): Message[] {
@@ -635,7 +648,7 @@ export function convertToLlm(messages: AgentMessage[]): Message[] {
 
 ### 10.1 role 区分没了，就靠文本说明
 
-既然塌缩后无法用 role 表达"这是什么"，只能把说明写进内容。这就是 `messages.ts:12-25` 那几个常量的用途：
+既然塌缩后无法用 role 表达"这是什么"，只能把说明写进内容。这就是 `messages.ts:11-24` 那几个常量的用途：
 
 ```typescript
 export const COMPACTION_SUMMARY_PREFIX = `The conversation history before this point was compacted into the following summary:
@@ -699,7 +712,7 @@ default: {
 
 ## 第 11 章 `Context`：把翻译推迟到最后一刻
 
-`packages/ai/src/types.ts:553`，三个字段：
+`packages/ai/src/types.ts:521`，三个字段：
 
 ```typescript
 export interface Context {
@@ -716,12 +729,12 @@ export interface Context {
 因为**各家 API 放的位置不一样**。同一个 `systemPrompt`：
 
 ```typescript
-// Anthropic：顶层独立字段（anthropic-messages.ts:1037）
+// Anthropic：顶层独立字段（anthropic-messages.ts:1027）
 params.system = [{ type: "text", text: sanitizeSurrogates(context.systemPrompt), … }];
 ```
 
 ```typescript
-// OpenAI：塞进消息数组第一条（openai-completions.ts:1050）
+// OpenAI：塞进消息数组第一条（openai-completions.ts:1170）
 params.push({ role: role, content: sanitizeSurrogates(context.systemPrompt) });
 ```
 
@@ -738,7 +751,7 @@ params.push({ role: role, content: sanitizeSurrogates(context.systemPrompt) });
 
 ### 11.2 provider 层做什么：看一家就够
 
-`packages/ai/src/api/` 下有十几个 provider 文件，都在干同一件事的不同方言。以 Anthropic 的 `buildParams`（`anthropic-messages.ts:981`）为样本，四件必需品先就位：
+`packages/ai/src/api/` 下有十几个 provider 文件，都在干同一件事的不同方言。以 Anthropic 的 `buildParams`（`anthropic-messages.ts:973`）为样本，四件必需品先就位：
 
 ```typescript
 const params: MessageCreateParamsStreaming = {

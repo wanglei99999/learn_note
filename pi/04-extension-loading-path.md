@@ -14,7 +14,7 @@
 >
 > 与 `generated/extensions` 的关系：那篇是**参考手册**（事件目录、上下文对象、快捷键仲裁、两个官方案例），按模块组织；本篇是**路径视角**，只跟一条数据流，实现细节挂在路径段下。两篇互补，不重复的部分请看那篇。
 >
-> 所有 `文件:行号` 基于 commit `859bd29bd`。核心文件两个：`packages/coding-agent/src/core/extensions/loader.ts`（发现 + 加载）、`runner.ts`（激活 + 派发）；汇合点在 `core/agent-session.ts`。
+> 所有 `文件:行号` 已重定位到 **v0.84.2**（`5cd93f688`）。核心文件两个：`packages/coding-agent/src/core/extensions/loader.ts`（发现 + 加载）、`runner.ts`（激活 + 派发）；汇合点在 `core/agent-session.ts`。
 
 ## 目录
 
@@ -63,18 +63,18 @@ ResourceLoader.reload()                  systemPrompt 现拼
 | 段 | 干什么 | 主函数 |
 |---|---|---|
 | ① 启动 | 六类资源分头加载 | `ResourceLoader.reload()` |
-| ② 发现 | 三个来源 → 扁平路径数组 | `discoverAndLoadExtensions` `loader.ts:694` |
-| ③ 加载 | 每个路径 → 一个盒子 | `loadExtension` `loader.ts:483` |
-| ④ 收拢 | 盒子们 + 共享 runtime 一起交出 | `loadExtensionsInternal` `loader.ts:534` |
-| ⑤ 激活 | 桩 ← 真实现 | `bindCore` `runner.ts:320` |
-| ⑥ 结算 | 内置工具 + 各盒子 tools | `_refreshToolRegistry` `agent-session.ts:2874` |
-| ⑦ 运行期 | 生命周期点上派发 | `emit` / `emitXxx` `runner.ts:820` 起 |
+| ② 发现 | 三个来源 → 扁平路径数组 | `discoverAndLoadExtensions` `loader.ts:697` |
+| ③ 加载 | 每个路径 → 一个盒子 | `loadExtension` `loader.ts:498` |
+| ④ 收拢 | 盒子们 + 共享 runtime 一起交出 | `loadExtensionsInternal` `loader.ts:547` |
+| ⑤ 激活 | 桩 ← 真实现 | `bindCore` `runner.ts:314` |
+| ⑥ 结算 | 内置工具 + 各盒子 tools | `_refreshToolRegistry` `agent-session.ts:2729` |
+| ⑦ 运行期 | 生命周期点上派发 | `emit` / `emitXxx` `runner.ts:801` 起 |
 
 后面每章放大其中一段。
 
 ### 1.3 管家：`ResourceLoader`
 
-`core/resource-loader.ts:39` 定义了一个接口，七个 getter 管六类资源：
+`core/resource-loader.ts:40` 定义了一个接口，七个 getter 管六类资源：
 
 ```typescript
 interface ResourceLoader {
@@ -89,7 +89,7 @@ interface ResourceLoader {
 }
 ```
 
-命令行上那排开关（`--no-extensions` / `--no-skills` / …，`main.ts:742` 附近）是**逐类独立**的：关掉扩展，skill 和 prompt 照常加载。这说明六类资源虽由一个管家统管，彼此并不依赖。
+命令行上那排开关（`--no-extensions` / `--no-skills` / …，`main.ts:758` 附近）是**逐类独立**的：关掉扩展，skill 和 prompt 照常加载。这说明六类资源虽由一个管家统管，彼此并不依赖。
 
 本篇只跟 extension 这一类。
 
@@ -97,7 +97,7 @@ interface ResourceLoader {
 
 ## 第 2 章 发现段：三个来源怎么摊成一个路径数组
 
-入口 `discoverAndLoadExtensions`（`loader.ts:694`）。名字里两个动词，前面全在"发现"，最后一行才"加载"。
+入口 `discoverAndLoadExtensions`（`loader.ts:697`）。名字里两个动词，前面全在"发现"，最后一行才"加载"。
 
 ### 2.1 三个来源，有序
 
@@ -372,7 +372,7 @@ if (extension) { extensions.push(extension); }
 ### 4.1 类型定义
 
 ```typescript
-// types.ts:1752
+// types.ts:1719
 export interface Extension {
 	path: string;                                  // 原始路径
 	resolvedPath: string;                          // 绝对路径
@@ -516,7 +516,7 @@ for (const extPath of paths) {
 ### 5.3 一造出来全是"调了就抛错"的桩
 
 ```typescript
-// loader.ts:184-239
+// loader.ts:177-245
 export function createExtensionRuntime(): ExtensionRuntime {
 	const notInitialized = () => {
 		throw new Error("Extension runtime not initialized. Action methods cannot be called during extension loading.");
@@ -629,7 +629,7 @@ return { extensions, errors, runtime: resolvedRuntime };
 ### 6.2 `AgentSession` 构造时激活
 
 ```typescript
-// agent-session.ts:2850 起
+// agent-session.ts:2705 起
 const extensionsResult = this._resourceLoader.getExtensions();   // 取回上一段的产物
 
 this._extensionRunner = new ExtensionRunner(
@@ -644,7 +644,7 @@ this._applyExtensionBindings(this._extensionRunner);
 ### 6.3 `bindCore` 干的事：就地替换
 
 ```typescript
-// runner.ts:320-344
+// runner.ts:314-337
 bindCore(actions: ExtensionActions, contextActions: ExtensionContextActions, providerActions?: {...}) {
 	this.runtime.sendMessage     = actions.sendMessage;
 	this.runtime.sendUserMessage = actions.sendUserMessage;
@@ -657,7 +657,7 @@ bindCore(actions: ExtensionActions, contextActions: ExtensionContextActions, pro
 	// ...十几行，桩逐个换成能摸到真会话的实现
 ```
 
-`agent-session.ts:2635` 传进去的 `actions` 就是这些真实现——它们能摸到 `sessionManager`、当前模型、abort 信号这些真会话资源。
+`agent-session.ts:2490` 传进去的 `actions` 就是这些真实现——它们能摸到 `sessionManager`、当前模型、abort 信号这些真会话资源。
 
 顺带把加载期排队的 provider 冲刷进 `ModelRegistry`，并把 `registerProvider` 从"排队版"换成"立即生效版"：
 
@@ -712,7 +712,7 @@ export default function (pi) {
 ### 6.6 结算工具
 
 ```typescript
-// agent-session.ts:2874
+// agent-session.ts:2729
 this._refreshToolRegistry({ activeToolNames: baseActiveToolNames, includeAllExtensionTools: options.includeAllExtensionTools });
 ```
 
@@ -727,7 +727,7 @@ this._refreshToolRegistry({ activeToolNames: baseActiveToolNames, includeAllExte
 ### 7.1 没有合并索引，全是临时遍历
 
 ```typescript
-// runner.ts:585
+// runner.ts:569
 hasHandlers(eventType: string): boolean {
 	for (const ext of this.extensions) {                 // ← 外层：遍历所有盒子
 		const handlers = ext.handlers.get(eventType);      // ← 内层：现查这个盒子的 Map
@@ -764,7 +764,7 @@ getMarkdownTransformers(): MarkdownTransformer[] {
 ### 7.2 派发的骨架：两层循环
 
 ```typescript
-// runner.ts:820
+// runner.ts:801
 async emit<TEvent extends RunnerEmitEvent>(event: TEvent): Promise<RunnerEmitResult<TEvent>> {
 	const ctx = this.createContext();
 	let result: SessionBeforeEventResult | undefined;
@@ -794,7 +794,7 @@ async emit<TEvent extends RunnerEmitEvent>(event: TEvent): Promise<RunnerEmitRes
 关键在于**"根据逻辑执行"的逻辑不是一套，每个事件各有各的**。看类型定义：
 
 ```typescript
-// runner.ts:129
+// runner.ts:125
 /**
  * Events handled by the generic emit() method.
  * Events with dedicated emitXxx() methods are excluded for stronger type safety.

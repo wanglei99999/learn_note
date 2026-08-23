@@ -18,7 +18,7 @@
 >
 > 第 4 章是路旁参照，但值得单独一提：它从 `defer_loading` 这个不起眼的标记出发，挖出了**前缀缓存**这条横切线——为什么改动的代价取决于它落在第几个 token，为什么"每轮重发全部历史"离了缓存就不成立，以及 pi 为此付出的三道安全闸。这条线和 `generated/robustness-and-cost` 的主题重叠，但入口完全不同。
 >
-> 所有 `文件:行号` 基于 commit `859bd29bd`。核心文件六个：`core/agent-session.ts`（结算与覆盖）、`core/system-prompt.ts`（拼装）、`core/extensions/runner.ts`（链式改写）、`core/extensions/wrapper.ts`（工具包装）、`packages/ai/src/utils/deferred-tools.ts` + `packages/ai/src/api/anthropic-messages.ts`（前缀缓存与延迟加载）、`packages/agent/src/agent-loop.ts`（每轮取用）。
+> 所有 `文件:行号` 已重定位到 **v0.84.2**（`5cd93f688`）。核心文件六个：`core/agent-session.ts`（结算与覆盖）、`core/system-prompt.ts`（拼装）、`core/extensions/runner.ts`（链式改写）、`core/extensions/wrapper.ts`（工具包装）、`packages/ai/src/utils/deferred-tools.ts` + `packages/ai/src/api/anthropic-messages.ts`（前缀缓存与延迟加载）、`packages/agent/src/agent-loop.ts`（每轮取用）。
 
 ## 目录
 
@@ -60,7 +60,7 @@ cwd ─────────────┼─► 拼装 ─► _baseSystemPr
 
 ## 第 2 章 `tools` 支流：从盒子到 `Context.tools`
 
-### 2.1 摊平：`getAllRegisteredTools`（`runner.ts:464`）
+### 2.1 摊平：`getAllRegisteredTools`（`runner.ts:451`）
 
 04 篇讲过，扩展的工具躺在各自盒子的 `tools` Map 里。第一步是摊平：
 
@@ -80,7 +80,7 @@ getAllRegisteredTools(): RegisteredTool[] {
 
 **同名工具，先加载的赢。** 又是那个"先来先得"——04 篇的发现段去重、`getMessageRenderer` 都是这个套路。所以项目扩展的工具会挡住全局扩展的同名工具。
 
-### 2.2 三个来源汇总（`agent-session.ts:2733`）
+### 2.2 三个来源汇总（`agent-session.ts:2588`）
 
 ```typescript
 const registeredTools = this._extensionRunner.getAllRegisteredTools();       // ① 扩展
@@ -160,7 +160,7 @@ this._toolRegistry = toolRegistry;                                           // 
 
 **同一批工具，两种投影。** 跟 02 篇 `sessionEntryToContextMessages` 是同一个模式——**一份源数据，按消费方的需要各投一份，谁也别迁就谁**。
 
-#### `wrapRegisteredTool` 到底干什么（`extensions/wrapper.ts:22`）
+#### `wrapRegisteredTool` 到底干什么（`extensions/wrapper.ts:17`）
 
 先破除一个想当然的误解，文件开头注释直说了：
 
@@ -173,7 +173,7 @@ this._toolRegistry = toolRegistry;                                           // 
 
 **包装层不是拦截层。** 它只干两件小事。
 
-**事一：类型适配 + 补第五个参数**（`tools/tool-definition-wrapper.ts:6`）
+**事一：类型适配 + 补第五个参数**（`tools/tool-definition-wrapper.ts:5`）
 
 ```typescript
 export function wrapToolDefinition(definition, ctxFactory?): AgentTool {
@@ -200,7 +200,7 @@ export function wrapToolDefinition(definition, ctxFactory?): AgentTool {
 
 跟 04 篇第 7 章的"现查现用"同源——**不缓存派生状态，用的时候现造，永不过期**。
 
-**事二：探测工具是否"解锁"了新工具**（`wrapper.ts:28-41`）
+**事二：探测工具是否"解锁"了新工具**（`wrapper.ts:22-35`）
 
 ```typescript
 execute: async (toolCallId, params, signal, onUpdate) => {
@@ -316,7 +316,7 @@ setActiveToolsByName(toolNames: string[]): void {
 
 要真去执行，得拿这个 `name` 回查——查的正是 `Context.tools`。03 篇的 T3 段里查了两次：
 
-**① 决定串行还是并行**（`agent-loop.ts:449-456`）
+**① 决定串行还是并行**（`agent-loop.ts:418-425`）
 
 ```typescript
 const toolCalls = assistantMessage.content.filter((c) => c.type === "toolCall");
@@ -333,7 +333,7 @@ return executeToolCallsParallel(...);
 
 注意 `?.executionMode`：查不到时整个表达式是 `undefined`，**不算 sequential**。这里不处理"找不到"，留给下一处。
 
-**② 取出真正要用的实现**（`agent-loop.ts:631-645`）
+**② 取出真正要用的实现**（`agent-loop.ts:600-614`）
 
 ```typescript
 const tool = currentContext.tools?.find((t) => t.name === toolCall.name);
@@ -362,7 +362,7 @@ const validatedArgs = validateToolArguments(tool, preparedToolCall); // 用 tool
 
 ## 第 3 章 `systemPrompt` 支流（上）：备料与拼装
 
-### 3.1 `_rebuildSystemPrompt` 凑七样料（`agent-session.ts:1144`）
+### 3.1 `_rebuildSystemPrompt` 凑七样料（`agent-session.ts:1034`）
 
 它自己不拼字符串，只负责把料凑齐：
 
@@ -404,7 +404,7 @@ private _rebuildSystemPrompt(toolNames: string[]): string {
 
 `this._baseSystemPromptOptions = ...` 这个赋值不是顺手写的——扩展的 `before_agent_start` 需要拿到它（第 5 章），才能知道"当前提示词是基于什么料拼的"。
 
-### 3.2 两条分叉：`customPrompt` 只替换主体（`system-prompt.ts:50`）
+### 3.2 两条分叉：`customPrompt` 只替换主体（`system-prompt.ts:46`）
 
 ```typescript
 if (customPrompt) {
@@ -590,7 +590,7 @@ if (hasRead && skills.length > 0) prompt += formatSkillsForPrompt(skills);
 >
 > 4.1–4.3 讲三个提示词字段各自去哪；4.4–4.5 顺着 `defer_loading` 这条线索挖下去，讲**前缀缓存如何把"提示词的排布顺序"变成工程约束**，并回填 2.4 节留下的"为什么只报新增"。4.6–4.8 收束回 pi 的取舍。
 
-### 4.1 三个并列字段（`extensions/types.ts:482`）
+### 4.1 三个并列字段（`extensions/types.ts:449`）
 
 ```typescript
 export interface ToolDefinition<...> {
@@ -609,7 +609,7 @@ export interface ToolDefinition<...> {
 }
 ```
 
-拿 `read` 的实际值对比（`core/tools/read.ts:220-224`）：
+拿 `read` 的实际值对比（`core/tools/read.ts:216-220`）：
 
 ```typescript
 description: `Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp).
@@ -629,7 +629,7 @@ promptGuidelines: ["Use read to examine files instead of cat or sed."],
 
 ### 4.2 `description` 走的是 API 通道，不是提示词
 
-`convertTools`（`packages/ai/src/api/anthropic-messages.ts:1344`）：
+`convertTools`（`packages/ai/src/api/anthropic-messages.ts:1326`）：
 
 ```typescript
 return {
@@ -803,7 +803,7 @@ messages k+1..n    位置后移
 
 "deferred loading" 里的 loading 是字面意思——**不是传得晚，是渲染进上下文的位置靠后**。
 
-#### 4.5.2 拼装现场（`anthropic-messages.ts:991-1069`）
+#### 4.5.2 拼装现场（`anthropic-messages.ts:983-1058`）
 
 ```typescript
 const toolPlacement = splitDeferredTools(
@@ -877,7 +877,7 @@ for (const [name, tool] of uniqueTools) {
 
 "已被调用的工具又出现在 `addedToolNames` 里"是可能的：`addedToolNames` 是**包装层差集与工具自报的并集**（见 2.4），工具自报那部分没人校验；工具集来回切换也会造成同名工具被重复声明。**这道闸不追究原因，只要此刻之前用过就一律不延迟。**
 
-配套的守卫在 `convertToolResult`（`anthropic-messages.ts:1142`）：
+配套的守卫在 `convertToolResult`（`anthropic-messages.ts:1130`）：
 
 ```typescript
 if (!deferredToolNames.has(normalizedName) || loadedToolNames.has(normalizedName)) continue;
@@ -894,9 +894,9 @@ if (!deferredToolNames.has(normalizedName) || loadedToolNames.has(normalizedName
 
 | 位置 | 判断 | 不满足时 |
 |---|---|---|
-| `wrapper.ts:32` | 这次是不是"纯新增" | 完全不报告，让 `Context.tools` 全量重发兜底 |
+| `wrapper.ts:26` | 这次是不是"纯新增" | 完全不报告，让 `Context.tools` 全量重发兜底 |
 | `deferred-tools.ts` | 这个工具是不是"先定义后使用" | 不延迟，塞进前缀 |
-| `anthropic-messages.ts:998` | 是不是"全部都被判成延迟" | 全部提回 immediate |
+| `anthropic-messages.ts:990` | 是不是"全部都被判成延迟" | 全部提回 immediate |
 
 第三条的理由：**"一个立即可用的工具都没有"是病态状态**——缓存断点无处可打，模型开局手上空空。宁可放弃这次优化。
 
@@ -906,7 +906,7 @@ if (!deferredToolNames.has(normalizedName) || loadedToolNames.has(normalizedName
 
 2.4 节留了个尾巴——`wrapper.ts` 为什么只探测新增。现在能回答了，而且理由有两层：
 
-**① `addedToolNames` 根本不是"通知工具集变了"，而是"延迟加载的加载点标记"。** 类型注释写得很清楚（`packages/ai/src/types.ts:490`）：
+**① `addedToolNames` 根本不是"通知工具集变了"，而是"延迟加载的加载点标记"。** 类型注释写得很清楚（`packages/ai/src/types.ts:458`）：
 
 ```typescript
 /**
@@ -939,7 +939,7 @@ pi 没有任何"不支持原生工具调用"的降级路径（全仓库没有 `s
 
 模型读 `read` 的 description 时并不在比较 `read` 和 `bash`，所以"别拿 bash 干 read 的活"这句话写进 description 是无效的。
 
-### 4.7 对照：skill 为什么必须走提示词（`core/skills.ts:362`）
+### 4.7 对照：skill 为什么必须走提示词（`core/skills.ts:355`）
 
 ```typescript
 export function formatSkillsForPrompt(skills: Skill[]): string {
@@ -980,7 +980,7 @@ export function formatSkillsForPrompt(skills: Skill[]): string {
 
 ### 4.8 一个越界的补丁
 
-`core/tools/bash.ts:518-523`：
+`core/tools/bash.ts:503-508`：
 
 ```typescript
 const tool = wrapToolDefinition(definition);
@@ -996,7 +996,7 @@ Object.assign(tool, {
 
 ## 第 5 章 `systemPrompt` 支流（下）：每轮的覆盖与复位
 
-### 5.1 两个字段（`agent-session.ts:420-424`）
+### 5.1 两个字段（`agent-session.ts:377-380`）
 
 ```typescript
 // Base system prompt (without extension appends) - used to apply fresh appends each turn
@@ -1053,7 +1053,7 @@ _systemPromptOverride  ← 扩展每轮改写           （每轮驱动，一轮
 
 **分层存储、取用时合成，别提前把层压平。** 压平了就再也拆不开——跟 01 篇会话树是同一个思路。
 
-### 5.3 每轮怎么设（`agent-session.ts:1372-1402`）
+### 5.3 每轮怎么设（`agent-session.ts:1244-1270`）
 
 ```typescript
 const result = await this._extensionRunner.emitBeforeAgentStart(
@@ -1088,7 +1088,7 @@ if (result?.systemPrompt !== undefined) {
 
 **连 `systemPromptOptions` 一起传**，扩展拿到的不只是拼好的字符串，还有原料（`skills` / `contextFiles` / `selectedTools` / `toolSnippets`…），可以自己调 `buildSystemPrompt` 换参数重拼，而不是在成品字符串上做正则替换。
 
-### 5.4 链式改写的含义（`runner.ts:1110-1153`）
+### 5.4 链式改写的含义（`runner.ts:1081-1122`）
 
 04 篇第 7 章列过四种聚合语义，这里是"链式"的实例。四种的区别：
 
@@ -1181,7 +1181,7 @@ if (result?.systemPrompt !== undefined) currentSystemPrompt = result.systemPromp
 
 **"收集"的产物是多份并列（数组），框架能替你合并；"链式"的产物是一份不断演化的东西，合并规则只有 handler 知道，框架无法代劳。**
 
-### 5.5 为什么要重写 `ctx.getSystemPrompt`（`runner.ts:1117-1125`）
+### 5.5 为什么要重写 `ctx.getSystemPrompt`（`runner.ts:1088-1095`）
 
 ```typescript
 const ctx = Object.defineProperties({}, Object.getOwnPropertyDescriptors(this.createContext())) as ExtensionContext;
@@ -1205,7 +1205,7 @@ handler 有**两条路**读到当前提示词：
 
 #### 5.5.1 为什么不能用展开：`createContext()` 返回的全是 getter
 
-代码里另一处同样写法的地方（`runner.ts:773-775`，命令上下文）配了英文注释，把理由写死了：
+代码里另一处同样写法的地方（`runner.ts:755-756`，命令上下文）配了英文注释，把理由写死了：
 
 ```text
 // createContext() stay lazy. A spread would eagerly read them once and freeze the
@@ -1213,7 +1213,7 @@ handler 有**两条路**读到当前提示词：
 // 属性描述符复制保留 getter 本身，使命令上下文同样受失效检查和最新 UI/core 绑定约束。
 ```
 
-看 `createContext()` 返回什么（`runner.ts:695-731`）：
+看 `createContext()` 返回什么（`runner.ts:677-713`）：
 
 ```typescript
 return {
@@ -1314,7 +1314,7 @@ _runAgentPrompt 的 while          ← 会话层：重试 / 压缩 / 扩展补�
 
 ## 第 6 章 汇合：`prepareNextTurnWithContext`
 
-### 6.1 每轮刷入（`agent-session.ts:584-598`）
+### 6.1 每轮刷入（`agent-session.ts:546-560`）
 
 ```typescript
 this.agent.prepareNextTurnWithContext = async (turn, signal) => {
@@ -1337,7 +1337,7 @@ this.agent.prepareNextTurnWithContext = async (turn, signal) => {
 
 `tools` 用 `.slice()` 拷贝：给出去的是快照，本轮执行途中 `state.tools` 再变也不影响已发出的清单。**这是"当轮固定"的落实处。**
 
-### 6.2 最终组装（`packages/agent/src/agent-loop.ts:321`）
+### 6.2 最终组装（`packages/agent/src/agent-loop.ts:297`）
 
 ```typescript
 // Build LLM context
