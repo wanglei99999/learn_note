@@ -709,7 +709,85 @@ export default function (pi) {
 
 **factory 体的唯一职责是声明"我有什么"；真正"干什么"永远发生在回调里。**
 
-### 6.6 结算工具
+### 6.6 顺着一个动作走到底：`setModel`
+
+6.3 那段 `bindCore` 十几行赋值看着很平——桩换真货，仅此而已。但"真货"到底有多厚，得挑一个跟到底才知道。挑 `setModel`，因为它是**动作里副作用最全的一个**。
+
+扩展看到的是这个签名（`extensions/types.ts:1376`）：
+
+```typescript
+setModel(model: Model<any>): Promise<boolean>;
+```
+
+**返回 `boolean`，不是 `void`，也不抛错。** bindCore 换上去的真身解释了为什么（`agent-session.ts:2531-2535`）：
+
+```typescript
+setModel: async (model) => {
+	if (!this._modelRuntime.hasConfiguredAuth(model.provider)) return false;   // ← 没配 key：温和拒绝
+	await this.setModel(model);
+	return true;
+},
+```
+
+这是一层**降级封装**：扩展想切一个用户没配 key 的模型，不该炸掉整个会话，返回 `false` 让扩展自己决定怎么办。
+
+而它转调的 `AgentSession.setModel`（`:1598`）才是完整版，七行里有五种不同性质的副作用：
+
+```typescript
+async setModel(model: Model<any>, options: ModelMutationOptions = {}): Promise<void> {
+	if (!(await this._modelRuntime.checkAuth(model.provider))) {
+		throw new Error(`No API key for ${model.provider}/${model.id}`);   // ① 这一层是抛的
+	}
+	const previousModel = this.model;
+	const thinkingLevel = this._getThinkingLevelForModelSwitch(model);      // ② 算思考档
+	this.agent.state.model = model;                                        // ③ 改内存状态
+	this.sessionManager.appendModelChange(model.provider, model.id);       // ④ 落盘一条会话条目
+	if (options.persist) {
+		this.settingsManager.setDefaultModelAndProvider(model.provider, model.id);   // ⑤ 可选：写全局默认
+	}
+	this.setThinkingLevel(thinkingLevel);                                  // ⑥ 应用（并钳制）
+	await this._emitModelSelect(model, previousModel, "set");              // ⑦ 广播给扩展
+}
+```
+
+四个点值得停一下：
+
+**④ 落盘的是会话条目，不是设置文件。** `appendModelChange` 往会话树里追加一条"此处换了模型"的记录——这正是 02 篇第 6 章 `getSessionContextSettings` 要重放的东西。**模型不是会话的一个属性，是会话历史里的一个事件**；恢复会话时靠重放这些条目还原"当前模型"。
+
+**⑤ `persist` 默认关。** 换模型默认**只影响本次会话**，除非调用方明确说要写进全局默认：
+
+| 调用通道 | persist | 语义 |
+|---|---|---|
+| `pi.setModel()`（扩展） | 永远不传 | 只作用于当前会话 |
+| `/model <名字>` 直接命中（`interactive-mode.ts:4810`） | 显式 `{ persist: false }` | 打了个名字就切，本次会话有效 |
+| `/model` 弹选择器（`:4954`） | 由用户操作决定 | 选中即用；明确选"设为默认"才写盘 |
+
+选择器连状态提示都分两句（`:4958`）：`Default model: …` 还是 `Model: …`。**语义分层：能力越靠外、动作越轻，副作用越保守。**
+
+**② + ⑥ 思考档不是跟着模型走的。** `_getThinkingLevelForModelSwitch`（`:1773`）三级择优：
+
+```text
+显式指定的档  >  这个模型自己的 per-model 设置  >  全局默认  >  当前档  >  DEFAULT
+```
+
+算出来还要过 `setThinkingLevel` 的钳制（`:1716`）——目标模型不支持 `xhigh` 就降到它支持的最高档。而且注释特意写明：**模型持久化不会顺带改写全局思考档默认值**，两件事各归各。
+
+**⑦ 同模型不发事件。** `_emitModelSelect`（`:1578`）开头一行 `if (modelsAreEqual(previousModel, nextModel)) return;`——切到自己不算切换。这是给扩展的一条隐含契约：**收到 `model_select` 就意味着真的变了**，handler 里不必自己去比。
+
+`cycleModel`（`:1625`）在这之上加了一层"在哪个集合里转"的判断：
+
+```typescript
+if (this._scopedModels.length > 0) {
+	return this._cycleScopedModel(direction, options);   // --models 限定的小圈子
+}
+return this._cycleAvailableModel(direction, options);   // 所有可用模型
+```
+
+`_scopedModels` 来自启动参数 `--models`（`main.ts:786` → `agent-session.ts:386`），是"这次会话我只想在这几个之间来回按"的白名单。scoped 分支多做一件事：**先按当前真的可用过滤一遍**（`:1642`），过滤完只剩 ≤1 个就返回 `undefined` 什么都不做——白名单里写了但没配 key 的模型，不该让循环卡在上面。
+
+> **这一节的用处不在模型本身**，而在于它是"runtime 动作"的完整样本：**对外一层负责降级，对内一层负责全部副作用（内存 + 落盘 + 设置 + 事件）**。bindCore 那十几行赋值，每一行背后都是这样一组东西。
+
+### 6.7 结算工具
 
 ```typescript
 // agent-session.ts:2729
@@ -862,13 +940,82 @@ ctx.getSystemPrompt = () => {
 project_trust        → 返回值决定这个项目要不要被信任
 before_agent_start   → 返回值改写 systemPrompt、往上下文塞消息
 tool_call            → 可以拦截、改参数、阻止工具执行
+tool_result          → 可以改写工具的产物（含把成功改成失败）
 ```
 
 这才是扩展系统真正的威力：不是"发生了什么告诉我一声"，而是"**在这个决策点上，你有发言权**"。
 
 顺带，`before_agent_start` 能改 `systemPrompt` 说明：**`Context.systemPrompt` 不只是拼装出来的静态文本，扩展在每轮开始前还能插手改它。** 这是下一段的伏笔。
 
-### 7.5 唯一的例外：工具被结算
+### 7.5 `tool_call` 的另一半：`tool_result`
+
+`tool_call` 管**执行前**，`tool_result` 管**执行后**，这对钩子把工具的一次调用夹在中间。挂载点在 agent 的 `afterToolCall` 上（`agent-session.ts:506`）：
+
+```typescript
+this.agent.afterToolCall = async ({ toolCall, args, result, isError }) => {
+	const runner = this._extensionRunner;
+	const hookResult = runner.hasHandlers("tool_result")        // ① 没人听就整段跳过
+		? await runner.emitToolResult({ type: "tool_result", toolName: toolCall.name, toolCallId: toolCall.id,
+				input: args as Record<string, unknown>, content: result.content, details: result.details, isError,
+				usage: result.usage })
+		: undefined;
+
+	const content = hookResult?.content ?? result.content ?? [];
+	// Runs after the extension hook so images injected or replaced by extensions are normalized too.
+	const normalizedContent = await normalizeToolResultImages(content, {   // ② 归一化在钩子之后
+		autoResizeImages: this.settingsManager.getImageAutoResize(),
+	});
+
+	if (!hookResult && normalizedContent === content) {
+		return undefined;                                        // ③ 谁都没改 → 让上层跳过重写
+	}
+	return { content: normalizedContent, details: hookResult?.details,
+		isError: hookResult?.isError ?? isError, usage: hookResult?.usage };
+};
+```
+
+**能改的四个字段**（`extensions/types.ts:1106`）：
+
+```typescript
+export interface ToolResultEventResult {
+	content?: (TextContent | ImageContent)[];   // 工具的产物本身
+	details?: unknown;                          // 结构化细节（TUI 渲染用）
+	isError?: boolean;                          // ← 成败判定可以被翻转
+	usage?: Usage;                              // 计费/统计
+}
+```
+
+`isError` 可写是这里最有分量的一条：**扩展能把一个失败的工具结果改成成功，或者反过来**。典型用途是把某类预期内的报错（找不到文件、grep 无匹配）降级成正常结果，不让模型误以为出了故障。
+
+聚合语义是 7.3 那张表里的**链式变换**，但比 `before_agent_start` 更细一档——**逐字段累积**（`runner.ts:877-906`）：
+
+```typescript
+const currentEvent: ToolResultEvent = { ...event };
+let modified = false;
+for (const ext of this.extensions) {
+	for (const handler of ext.handlers.get("tool_result") ?? []) {
+		const handlerResult = await handler(currentEvent, ctx);
+		if (!handlerResult) continue;
+		if (handlerResult.content !== undefined) { currentEvent.content = handlerResult.content; modified = true; }
+		if (handlerResult.details !== undefined) { currentEvent.details = handlerResult.details; modified = true; }
+		// isError / usage 同理
+	}
+}
+```
+
+四个字段各自独立地"谁给了就覆盖"，下一个 handler 看到的是**累计后的事件**。只改 `isError` 不会把别人改过的 `content` 冲掉。
+
+#### 顺序有意：为什么归一化排在钩子后面
+
+②那行的注释不是随口一写。`normalizeToolResultImages`（`utils/tool-result-images.ts:22`）解决的是这么个问题（该文件 `:11-21` 的注释）：
+
+> `read` 工具和 `@file` 附件的图片都过了 `processImage`，但**自己产图的工具**（扩展、MCP 桥、截图工具）交回来的是任意 base64。超大图会让 provider 拒掉**整段对话**，而不只是出问题的那一轮，所以在它进历史的时候归一化一次。
+
+关键词是**进历史**。02 篇讲过全链路唯一不可逆的一步；这里是同一个道理的另一面——**坏数据一旦落进会话历史，就会污染之后的每一次请求**。所以拦截点必须放在"最后一个还能改它的人"之后，那个人就是扩展。钩子先跑、归一化后跑，扩展塞进来的图也一并被收拾。
+
+③那行是配套的小优化：`normalizeToolResultImages` 在什么都没变时**返回原数组本身**（`:61` 的 `return changed ? normalized : content`），于是这里能用 `===` 判断"确实没动过"，直接返回 `undefined` 让上层省掉一次结果重写。**返回原引用是一种可被 `===` 检测的"无变化"信号**，比返回一个内容相同的新数组有用得多。
+
+### 7.6 唯一的例外：工具被结算
 
 工具确实有一份**汇总产物**——`_refreshToolRegistry`。为什么它特殊？
 
@@ -887,7 +1034,7 @@ registerTool(tool) {
 
 **判据：需要"整体一致的快照"才结算，否则现查。** 结算的代价是必须有显式失效机制。
 
-### 7.6 运行期的一句话总结
+### 7.7 运行期的一句话总结
 
 > **到了某个生命周期点 → 遍历所有盒子，现查该事件的全部 handler（按扩展顺序 + 注册顺序）→ 按该事件专属的聚合规则依次执行（广播 / 短路 / 链式 / 收集）→ 单个 handler 抛错只记进 errors，不打断其余。**
 
@@ -917,6 +1064,9 @@ registerTool(tool) {
 20. **现查现用胜过合并索引。** 派生状态会过期、要同步；现场遍历永不失配，且允许每个调用方自定冲突语义。
 21. **返回值有意义的事件走专用通道。** 用类型 `Exclude` 把它们从通用 `emit` 里剔出去，逼调用方选对聚合语义。
 22. **只有需要"整体一致快照"的才结算。** 工具清单要发给模型所以必须结算，代价是引入 `refreshTools()` 显式失效。
+23. **对外降级，对内完整。** `pi.setModel` 没配 key 时返回 `false`，`AgentSession.setModel` 同样情况直接抛；同理 `persist` 默认关，写全局默认必须调用方明确要求（6.6）。**能力越靠外，失败越该温和、副作用越该保守。**
+24. **清洗点放在所有写入者的下游。** `normalizeToolResultImages` 特意排在 `tool_result` 钩子之后，扩展塞进来的图也一并归一化（7.5）。凡是"进了历史就再也改不掉、还会污染之后每一次请求"的数据，清洗必须放在最后一个能改它的人后面。
+25. **无变化时返回原引用。** `normalizeToolResultImages` 什么都没改就返回入参数组本身，于是调用方能用 `===` 判断"真没动过"，省掉一次结果重写（7.5）。**返回原引用是一个可被 `===` 检测的信号，比返回内容相同的新数组有用得多。**
 
 ---
 
@@ -948,8 +1098,16 @@ registerTool(tool) {
 24. `before_agent_start` 的 `message` 和 `systemPrompt` 两个字段语义有何不同？为什么 `ctx.getSystemPrompt` 要被重写？
 25. `RunnerEmitEvent` 为什么要用 `Exclude` 剔掉一批事件？
 26. 为什么只有工具被"结算"，其它都现查？结算的代价是什么？
-27. 从磁盘文件到模型能调用这个工具，完整经过哪几段？每段的产物是什么？
+27. `pi.setModel` 为什么返回 `boolean` 而不是 `void`？同一件事在 `AgentSession.setModel` 里为什么改成抛错？
+28. 换模型默认写不写全局设置？`persist` 由谁决定、三个调用通道各传什么？
+29. `appendModelChange` 落的是设置文件还是会话条目？这和 02 篇的"配置即事件"怎么对上？
+30. `tool_call` 和 `tool_result` 分别管哪一侧？后者能改的四个字段里，哪一个最容易被低估？
+31. 为什么图片归一化要排在 `tool_result` 钩子之后而不是之前？说出那条注释给的理由。
+32. `normalizeToolResultImages` 在没改动时为什么要返回入参数组本身？调用方靠这一点省掉了什么？
+33. 从磁盘文件到模型能调用这个工具，完整经过哪几段？每段的产物是什么？
 
 ---
+
+*6.6（模型切换动作走读）与 7.5（`tool_result` 钩子）于 2026-08-23 随 v0.84.2 补写。*
 
 > **下一段**：`systemPrompt` 和 `tools` 怎么真正进 `Context`——`_refreshToolRegistry` 的结算规则、系统提示词的拼装顺序，以及 skill / prompt / theme 是不是同一套加载规则。跟完那段，`Context` 三个字段的源头就全通了，本系列 01–02–03–04 也就闭环回到了 02 篇的起点。

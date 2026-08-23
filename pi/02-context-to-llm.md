@@ -789,6 +789,85 @@ if (options?.temperature !== undefined && !options?.thinkingEnabled && compat.su
 
 再往下（`convertMessages` 逐条把 `toolResult` 译成 `tool_result` block、`toolCallId` 译成 `tool_use_id`，`convertTools` 译工具定义）是纯粹的字段对照工作，**看一家就能推知其余，不必逐个走读**。
 
+### 11.3 请求的另一半：`options`
+
+上一节的代码里 `options?.maxTokens`、`options?.temperature`、`options?.toolChoice` 反复出现，一直没交代它是什么。签名是 `stream(model, context, options)` —— **`Context` 是"说什么"，`options` 是"怎么说、发给谁、发多久"**。这一半也有结构，三层继承（都在 `packages/ai/src/types.ts`）：
+
+```text
+ProviderRequestOptions<TModel>   :124   怎么发 —— 传输与生命周期
+        ▲
+StreamOptions                    :179   发什么 —— 这次请求的内容参数
+        ▲
+SimpleStreamOptions              :314   统一语义 —— 跨 provider 的抽象开关
+```
+
+| 层 | 装的是 | 代表字段 |
+|---|---|---|
+| `ProviderRequestOptions` | 与内容无关的传输面 | `signal` `apiKey` `fetch` `env` `headers` `timeoutMs` `maxRetries` `maxRetryDelayMs` `onPayload` `onResponse` `telemetryContext` |
+| `StreamOptions` | 这次要发的参数 | `temperature` `maxTokens` `samplingParams` `transport` `cacheRetention` `sessionId` `metadata` |
+| `SimpleStreamOptions` | provider 无关的语义开关 | `toolChoice` `reasoning` `deferred` `thinkingBudgets` |
+
+**分层不是为了好看，是为了让类型说出"这个操作不需要那些"。** 证据在下面两行：
+
+```typescript
+// :227
+export interface DeferredFetchOptions extends ProviderRequestOptions<Model<Api>> {
+	wait?: number;   // 长轮询毫秒数，默认 0 = 只查一次
+}
+// :236
+export type DeferredCancelOptions = ProviderRequestOptions<Model<Api>>;
+```
+
+取回或取消一个延迟结果，只继承**最上面那层**——**去拿一个已经在算的结果，谈 `temperature` 是没有意义的**。分层把这件事写进了类型，而不是靠文档提醒。
+
+#### 四个值得单独认识的字段
+
+**`samplingParams`（`:193`）——逃生舱。**
+
+```typescript
+/** ... Merged over `Model.samplingParams` per key. Only applied by
+ *  OpenAI-compatible adapters (completions, responses, Azure responses); other APIs ignore it. */
+samplingParams?: Record<string, unknown>;
+```
+
+任意 key 原样并进请求体，**排在具名字段之后所以能覆盖它们**。给 llama.cpp / vLLM / SGLang 这类自定义 OpenAI 兼容服务器留的口子：`top_p`、`top_k`、`min_p`、`repetition_penalty` —— pi 不建模这些参数，但也不挡着。还和 `Model.samplingParams`（`:838`）**逐 key 合并**：模型级设默认，请求级覆盖。
+
+**一个统一 API 必然要有这样一个口子**，否则每支持一个小众参数就得改一次公共类型。
+
+**`toolChoice`（`:82` + `:316`）——统一层只取交集。**
+
+```typescript
+export type ToolChoice = "auto" | "none";
+```
+
+就两个值。而各家原生能力远不止：Anthropic 支持 `any` 和指定工具名（`anthropic-messages.ts:265`），OpenAI 系直接透传 SDK 自己的类型（`azure-openai-responses.ts:59`）。统一层**只保留所有家都有的那部分**，要用完整能力得走 provider 专属 options（`ApiOptionsMap`，`:243`）。
+
+**统一层取交集，专属层留全集。** `cacheRetention`（`:108`，`"none" | "short" | "long"`，默认 `short`）是同一手法的另一例：各家缓存 TTL 写法五花八门，这里只给三档语义，各 provider 自己映射。`transport`（`:110`，`"sse" | "websocket" | "websocket-cached" | "auto"`）也是——**不支持的 provider 直接忽略，而不是报错**。
+
+**`deferred`（`:319`）——和 03 篇那个停止原因是同一件事的两头。**
+
+```typescript
+/** Ask a capable provider to return a durable handle and continue the request asynchronously. */
+deferred?: boolean | { window?: "15m" | "1h" | "24h" };
+```
+
+请求这一侧说"给我个句柄，你后台慢慢算"，响应那一侧就以 `stopReason: "deferred"` 收尾（03 篇 4.5）。之后拿 `DeferredFetchOptions` 去取。
+
+**`telemetryContext`（`:127`）** 来自 `@earendil-works/pi-telemetry`，给这次逻辑请求指定显式的父上下文——v0.84 新拆出来的 telemetry 包在这里接进请求路径。
+
+#### 类型上的"知道就严格，不知道就放行"
+
+```typescript
+// :260
+export type ApiStreamOptions<TApi extends Api> = TApi extends keyof ApiOptionsMap
+	? ApiOptionsMap[TApi]              // 已知 API → 该家的完整选项类型
+	: StreamOptions & Record<string, unknown>;   // 自定义 API 字符串 → 宽松形状
+```
+
+`ApiOptionsMap`（`:243`）把十个已知 API 各自映射到具体选项类型（`AnthropicOptions`、`BedrockOptions`……）。**认识的 API 给你严格检查，不认识的放行**——一个可扩展的统一 API 在类型层面能做到的最好平衡。
+
+> 回到本章主旨：`Context` 把翻译推迟到最后一刻，`options` 则把**差异**推迟到最后一刻。两者在 `stream(model, context, options)` 汇合，provider 各取所需。
+
 ---
 
 ## 第 12 章 全链路回望：三种形态与唯一不可逆的一步
@@ -857,6 +936,8 @@ HTTP body
 18. **依赖注入解开分层循环**：`agent` 包只挖 `convertToLlm` 的洞，coding-agent 填自己的实现——**谁定义的自定义类型，谁负责翻译回标准形态**（第 9 章 ①）。
 19. **开了口子就在出口设卡**：声明合并让加 role 很容易，`never` 穷尽检查保证漏改必然编译失败（10.3）。
 20. **兜底链要允许失败下坠**：`getApiKeyForProvider` 内部 `catch → undefined` 而非抛错，`||` 而非 `??`，两处配合才让"动态取不到就退回静态密钥"真正成立（第 9 章 ③）。
+21. **选项分层要能说出"这个操作不需要那些"**：`DeferredFetchOptions` 只继承 `ProviderRequestOptions`，于是"去取一个已经在算的结果"在类型上就拿不到 `temperature`（11.3）。**分层不是给字段归类，是把"不适用"写进类型，而不是写进文档。**
+22. **统一层取交集，专属层留全集，另开一个逃生舱**：`toolChoice` 只保留所有 provider 都有的 `auto | none`，完整能力走 `ApiOptionsMap` 里的专属选项；`samplingParams` 让 pi 没建模的参数原样透传（11.3）。**一个统一 API 必须同时提供"最小公倍数"和"绕过我"两条路，否则每支持一个小众参数就得改一次公共类型。**
 
 ---
 
@@ -886,7 +967,12 @@ HTTP body
 20. 同一个 `systemPrompt`，Anthropic 和 OpenAI 分别放在报文的什么位置？这解释了 `Context` 为什么要把它单独拎出来？
 21. 取 API key 那一行为什么用 `||` 而不是 `??`？`getApiKeyForProvider` 里的 `catch { return undefined }` 和它是什么关系？
 22. 全链路唯一不可逆的一步是哪一步？说出至少两个"因为它不可逆所以才那样设计"的例子。
+23. `stream(model, context, options)` 里，`Context` 和 `options` 的分工是什么？后者分哪三层、各装什么？
+24. `DeferredFetchOptions` 为什么只继承最上面那层？这个选择在表达什么？
+25. `toolChoice` 只有 `auto | none` 两个值，可各家原生能力远不止——完整能力从哪里走？
+26. `samplingParams` 为什么要排在具名字段之后合并？它和 `Model.samplingParams` 是什么关系？
+27. `ApiStreamOptions` 那个条件类型，对已知 API 和自定义 API 字符串分别做什么？
 
 ---
 
-*基于 2026-08-14 / 08-15 的源码精读整理（对话式逐行走读）。上承01 篇（会话树的形状）。本篇只覆盖"出去"的方向；响应流回来之后（SSE 解析 → `AssistantMessage` → 落盘 → 下一轮）见 03 篇。`systemPrompt` 与 `tools` 这两条支流各自怎么攒出来，见 05 篇（提示词与工具的汇合）与 04 篇（扩展注册工具）。配套阅读：`docs-zh/coding-agent/compaction.md`（压缩细节）。*
+*基于 2026-08-14 / 08-15 的源码精读整理（对话式逐行走读）；11.3 节于 2026-08-23 随 v0.84.2 补写。上承01 篇（会话树的形状）。本篇只覆盖"出去"的方向；响应流回来之后（SSE 解析 → `AssistantMessage` → 落盘 → 下一轮）见 03 篇。`systemPrompt` 与 `tools` 这两条支流各自怎么攒出来，见 05 篇（提示词与工具的汇合）与 04 篇（扩展注册工具）。配套阅读：`docs-zh/coding-agent/compaction.md`（压缩细节）。*
