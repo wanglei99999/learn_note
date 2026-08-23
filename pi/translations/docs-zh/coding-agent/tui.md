@@ -1,4 +1,4 @@
-> **译文** | 原文：[`packages/coding-agent/docs/tui.md`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/tui.md) · 版本：v0.80.10（`eb8dd587`）· 译于 2026-08-02
+> **译文** | 原文：[`packages/coding-agent/docs/tui.md`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/tui.md) · 版本：v0.84.2（`5cd93f688`）· 译于 2026-08-02 · 更新于 2026-08-21
 
 > pi 可以创建 TUI 组件。让它为你的使用场景构建一个即可。
 
@@ -433,7 +433,7 @@ renderResult(result, options, theme, context) {
 
 | 类别 | 颜色 |
 |----------|--------|
-| 通用 | `text`、`accent`、`muted`、`dim` |
+| 通用 | `text`、`accent`、`muted`、`dim`、`searchMatchText` |
 | 状态 | `success`、`error`、`warning` |
 | 边框 | `border`、`borderAccent`、`borderMuted` |
 | 消息 | `userMessageText`、`customMessageText`、`customMessageLabel` |
@@ -446,7 +446,7 @@ renderResult(result, options, theme, context) {
 
 **背景色**（`theme.bg(color, text)`）：
 
-`selectedBg`、`userMessageBg`、`customMessageBg`、`toolPendingBg`、`toolSuccessBg`、`toolErrorBg`
+`selectedBg`、`searchMatchBg`、`userMessageBg`、`customMessageBg`、`toolPendingBg`、`toolSuccessBg`、`toolErrorBg`
 
 **Markdown 使用** `getMarkdownTheme()`：
 

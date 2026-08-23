@@ -1,4 +1,4 @@
-> **译文** | 原文：[`packages/tui/README.md`](https://github.com/earendil-works/pi/blob/main/packages/tui/README.md) · 版本：v0.80.10（`eb8dd587`）· 译于 2026-08-02
+> **译文** | 原文：[`packages/tui/README.md`](https://github.com/earendil-works/pi/blob/main/packages/tui/README.md) · 版本：v0.84.2（`5cd93f688`）· 译于 2026-08-02 · 更新于 2026-08-21
 
 # @earendil-works/pi-tui
 
@@ -6,25 +6,27 @@
 
 ## 特性
 
-- **差分渲染**：三策略渲染系统，只更新发生变化的部分
+- **可互换的渲染器**：共享的 `TUI` 接口，配有主屏幕与备用屏幕两种实现
+- **差分渲染**：只更新变化的行或视口行
+- **由应用接管滚动**：备用屏幕视口支持鼠标、触控板和键盘导航
 - **同步输出**：使用 CSI 2026 实现原子化屏幕更新（无闪烁）
 - **Bracketed Paste Mode**：正确处理大段粘贴，超过 10 行的粘贴会显示标记
 - **基于组件**：简单的 Component 接口，只需实现 render() 方法
 - **主题支持**：组件接受 theme 接口，可自定义样式
-- **内置组件**：Text、TruncatedText、Input、Editor、Markdown、Loader、SelectList、SettingsList、Spacer、Image、Box、Container
+- **内置组件**：Text、TruncatedText、Input、Editor、Markdown、Loader、SelectList、SettingsList、Spacer、Image、Box、Container、VStack、HStack、ScrollView
 - **内联图片**：在支持 Kitty 或 iTerm2 图形协议的终端中渲染图片
 - **自动补全支持**：文件路径和斜杠命令
 
 ## 快速开始
 
 ```typescript
-import { TUI, Text, Editor, ProcessTerminal, matchesKey } from "@earendil-works/pi-tui";
+import { type TUI, Text, Editor, ProcessTerminal, TuiMainScreen, matchesKey } from "@earendil-works/pi-tui";
 
 // 创建终端
 const terminal = new ProcessTerminal();
 
-// 创建 TUI
-const tui = new TUI(terminal);
+// 通过共享的 TUI 接口创建默认的主屏幕渲染器
+const tui: TUI = new TuiMainScreen(terminal);
 
 // 添加组件
 tui.addChild(new Text("Welcome to my app!"));
@@ -54,12 +56,20 @@ tui.start();
 
 ## 核心 API
 
-### TUI
+### TUI 接口与渲染器
 
-管理组件和渲染的主容器。
+`TUI` 是组件管理、焦点、overlay、输入、生命周期、终端查询与渲染的共享接口。只在构建应用时才需要选择具体的渲染器：
+
+- `TuiMainScreen` 渲染到主终端缓冲区，保留终端回滚缓冲。
+- `TuiAltScreen` 在备用终端缓冲区中渲染一个固定高度的视口，滚动由应用自己接管。停止时它会恢复主缓冲区，并打印完整的最终文档。
 
 ```typescript
-const tui = new TUI(terminal);
+import { type TUI, TuiAltScreen, TuiMainScreen } from "@earendil-works/pi-tui";
+
+const tui: TUI = new TuiMainScreen(terminal);
+// 若改为在备用终端缓冲区中使用由应用接管的视口：
+// const tui: TUI = new TuiAltScreen(terminal);
+
 tui.addChild(component);
 tui.removeChild(component);
 tui.start();
@@ -69,6 +79,53 @@ tui.requestRender(); // 请求重新渲染
 // 全局调试按键处理器（Shift+Ctrl+D）
 tui.onDebug = () => console.log("Debug triggered");
 ```
+
+### 备用屏幕的视口布局
+
+`TuiAltScreen` 可以渲染一套明确的、按终端高度排布的布局。`VStack` 和 `HStack` 负责分配受约束的区域，`ScrollView` 则为某个区域接管滚动。这些语义在 `TuiMainScreen` 上是有意不提供的——那里回滚由终端掌管。
+
+```typescript
+import {
+  Container,
+  isViewportTUI,
+  ScrollView,
+  Text,
+  VStack,
+} from "@earendil-works/pi-tui";
+
+const transcript = new Container();
+transcript.addChild(new Text("History"));
+
+const editorAndFooter = new VStack([
+  editor,
+  new Text("status"),
+]);
+
+if (isViewportTUI(tui)) {
+  tui.setLayoutRoot(new VStack([
+    {
+      component: new ScrollView(transcript, {
+        follow: "end",
+        primary: true,
+        overscroll: "chain",
+      }),
+      basis: 0,
+      grow: 1,
+      minSize: 1,
+    },
+    {
+      component: editorAndFooter,
+      basis: "auto",
+      shrink: 1,
+      minSize: 1,
+    },
+  ]));
+}
+```
+
+Stack 条目支持 `basis`、`grow`、`shrink`、`minSize`、`maxSize` 以及响应式的 `visible` 回调。鼠标滚轮输入作用于指针下方的滚动视图，未消耗的增量默认会向外层滚动视图链式传递。主滚动视图会接收备用屏幕的键盘导航动作，以及位于不可滚动区域上方的滚轮输入。它还能在 OSC 133 语义提示符标记之间跳转，与常见终端的提示符导航快捷键一致。按 `Ctrl+Shift+F` 搜索其已渲染的内容，用 `Enter`/`Ctrl+G` 和 `Shift+Enter`/`Ctrl+Shift+G` 在匹配项之间移动，按 `Escape` 关闭搜索。`TuiAltScreenOptions.searchMatchStyle` 和 `searchCurrentMatchStyle` 可自定义匹配高亮。
+
+每请求一帧，布局几何都会重新构建。有状态的组件会被保留，它们已有的渲染行缓存仍然有效。直接对这些布局组件调用 `render(width)` 会产生一份不受高度限制的文档；alt 模式恢复主屏幕时用的也是它。
 
 ### Overlays
 
@@ -192,7 +249,7 @@ class MyInput implements Component, Focusable {
 3. 将硬件终端光标定位到该位置
 4. 仅在启用 `showHardwareCursor` 时显示硬件光标
 
-光标默认保持隐藏。这样既保留了假光标的渲染，又能为那些用隐藏光标跟踪 IME 候选窗口的终端定位硬件光标。有些终端需要可见的硬件光标才能定位 IME；可通过 `TUI` 构造函数选项、`setShowHardwareCursor(true)` 或 `PI_HARDWARE_CURSOR=1` 启用。内置的 `Editor` 和 `Input` 组件已实现该接口。
+光标默认保持隐藏。这样既保留了假光标的渲染，又能为那些用隐藏光标跟踪 IME 候选窗口的终端定位硬件光标。有些终端需要可见的硬件光标才能定位 IME；可通过渲染器构造函数的 `showHardwareCursor` 参数、`setShowHardwareCursor(true)` 或 `PI_HARDWARE_CURSOR=1` 启用。内置的 `Editor` 和 `Input` 组件已实现该接口。
 
 **包含内嵌输入的容器组件：** 当容器组件（对话框、选择器等）包含 `Input` 或 `Editor` 子组件时，容器必须实现 `Focusable` 并把焦点状态传播给子组件：
 
@@ -537,6 +594,10 @@ tui.addChild(image);
 
 支持的格式：PNG、JPEG、GIF、WebP。尺寸会自动从图片头部解析。
 
+#### 备用屏幕下的图片兼容性
+
+在实现了 Kitty 图形协议的终端（包括 Kitty 和 Ghostty）中，`TuiAltScreen` 支持内联图片以及视口内的局部裁剪。iTerm2 的内联图片协议没有提供在滚动过程中删除既有放置或裁剪其源图的操作。为避免过期图片残留在已重绘的内容之上，`TuiAltScreen` 在 iTerm2 中会把图片组件渲染成文本占位符。`TuiMainScreen` 则仍然正常渲染 iTerm2 内联图片。
+
 ## 自动补全
 
 ### CombinedAutocompleteProvider
@@ -590,15 +651,17 @@ if (matchesKey(data, Key.enter)) {
 - 带修饰键：`Key.ctrl("c")`、`Key.shift("tab")`、`Key.alt("left")`、`Key.ctrlShift("p")`
 - 字符串格式也可以：`"enter"`、`"ctrl+c"`、`"shift+tab"`、`"ctrl+shift+p"`
 
-## 差分渲染
+## 渲染模式
 
-TUI 使用三种渲染策略：
+`TuiMainScreen` 使用三种渲染策略：
 
 1. **首次渲染**：输出所有行，不清除 scrollback
 2. **宽度变化或视口上方发生变化**：清屏并完整重渲染
 3. **常规更新**：将光标移动到第一个变化的行，清除到末尾，渲染变化的行
 
-所有更新都包裹在**同步输出**（`\x1b[?2026h` ... `\x1b[?2026l`）中，实现原子化、无闪烁的渲染。
+`TuiAltScreen` 掌管一个终端高度的视口。在没有显式布局根的情况下，它保持原有的单文档滚动行为。使用 `setLayoutRoot()` 后，`VStack`、`HStack` 和嵌套的 `ScrollView` 组件可以预留固定区域，并让受约束的区域各自独立滚动。它会就地更新发生变化的视口行，在位于底部时跟随流式输出，并在内容增长时保持手动选定的滚动位置。鼠标滚轮和可配置的键盘导航在滚动时不会改动终端回滚缓冲，其中也包括在 OSC 133 语义提示符标记之间跳转。点击 OSC 8 超链接会用配置好的 URL 处理程序打开它。按住主鼠标键拖动可选中文本并通过 OSC 52 复制到剪贴板；把拖动停在某个滚动视图的顶部或底部边缘会自动滚动，并把选区延伸到屏幕外的内容。Kitty 图片支持垂直方向的视口裁剪；iTerm2 内联图片则回退为文本，因为 iTerm2 协议无法在视口重绘期间删除或裁剪已放置的图像。
+
+两种渲染器都会把更新包裹在**同步输出**（`\x1b[?2026h` ... `\x1b[?2026l`）中，实现原子化、无闪烁的渲染。
 
 ## Terminal 接口
 

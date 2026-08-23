@@ -2,9 +2,11 @@
 
 本文件夹是 [earendil-works/pi](https://github.com/earendil-works/pi) 官方英文文档的简体中文翻译，自包含、可整体迁移。
 
-- **基于版本**：v0.80.10（commit `eb8dd587`）
-- **翻译日期**：2026-07-31（首批 3 篇）／2026-08-02（补齐其余全部译文）
-- **原文位置**：`packages/agent/docs/`、`packages/coding-agent/docs/` 及各包 README
+- **当前同步版本**：v0.84.2（commit `5cd93f688`）
+- **翻译日期**：2026-07-31（首批）／2026-08-02（补齐）／2026-08-21（同步 v0.84.2）／2026-08-23（补齐当前 52 篇文档）
+- **原文位置**：`packages/*/README.md`、`packages/agent/docs/`、`packages/coding-agent/docs/`
+
+译文头部的版本行以各篇实际同步点为准。上游已删除、当前版本没有对应原文的历史译文仍保留旧版本标记，不会伪装成已校对到 v0.84.2。
 
 ## 目录结构
 
@@ -12,12 +14,21 @@
 docs-zh/
 ├── README.md                  # 总导览索引
 ├── TRANSLATION-NOTES.md       # 本文件
-├── agent/                     # pi-agent-core：README + 5 篇设计文档
-├── coding-agent/              # pi CLI：README + 29 篇使用文档
+├── agent/                     # pi-agent-core：README + 8 篇设计文档
+├── coding-agent/              # pi CLI：README、使用文档、示例与测试说明
 ├── ai/README.md               # pi-ai README
+├── client/README.md           # pi-client README
+├── protocol/README.md         # pi-protocol README
+├── server/README.md           # pi-server README
+├── evals/README.md            # pi-evals README
+├── telemetry/README.md        # pi-telemetry README
+├── session-backends/          # session backend 文档
 ├── tui/README.md              # pi-tui README
+│   └── native/                # Windows 与 Darwin 原生构建说明
 └── orchestrator/README.md     # pi-orchestrator README
 ```
+
+当前英文文档覆盖率为 **52/52**。另外保留 6 篇上游已删除的历史译文，它们继续使用各自旧版本标记。
 
 注意：原仓库中文档位于各包的 `docs/` 子目录，本文件夹将其平铺到包名目录下（如 `packages/coding-agent/docs/usage.md` → `coding-agent/usage.md`）。
 
@@ -26,7 +37,7 @@ docs-zh/
 每篇译文正文标题之前，加一行引用块（路径与文件名按实际替换）：
 
 ```markdown
-> **译文** | 原文：[`packages/coding-agent/docs/usage.md`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/usage.md) · 版本：v0.80.10（`eb8dd587`）· 译于 2026-07-31
+> **译文** | 原文：[`packages/coding-agent/docs/usage.md`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/usage.md) · 版本：v0.84.2（`5cd93f688`）· 译于 2026-08-21
 ```
 
 ## 翻译风格

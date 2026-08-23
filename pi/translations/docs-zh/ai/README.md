@@ -1,4 +1,4 @@
-> **译文** | 原文：[`packages/ai/README.md`](https://github.com/earendil-works/pi/blob/main/packages/ai/README.md) · 版本：v0.80.10（`eb8dd587`）· 译于 2026-08-02
+> **译文** | 原文：[`packages/ai/README.md`](https://github.com/earendil-works/pi/blob/main/packages/ai/README.md) · 版本：v0.84.2（`5cd93f688`）· 译于 2026-08-02 · 更新于 2026-08-21
 
 # @earendil-works/pi-ai
 
@@ -78,6 +78,7 @@
 - **ZAI Coding Plan (Global)**（另有独立的中国区 provider）
 - **MiniMax**（另有独立的中国区 provider）
 - **Together AI**
+- **Baseten**
 - **Hugging Face**
 - **Moonshot AI**（另有独立的中国区 provider）
 - **GitHub Copilot**（需要 OAuth，见下文）
@@ -86,6 +87,7 @@
 - **OpenCode Go**
 - **Fireworks**（使用 OpenAI 和 Anthropic 兼容 API）
 - **Kimi For Coding**（Moonshot AI 订阅端点，使用 Anthropic 兼容 API）
+- **Qwen Token Plan**（个人版与既有目录分开，另有独立的中国区 provider）
 - **Xiaomi MiMo**（默认使用 API 计费端点，另有 `cn`/`ams`/`sgp` 区域的 Token Plan provider）
 - **任何 OpenAI 兼容 API**：Ollama、vLLM、LM Studio 等
 
@@ -314,8 +316,8 @@ Provider 可以有动态模型列表（llama.cpp 服务器、实时的 OpenRoute
 
 ```typescript
 // getModels() 返回最后已知的列表（首次 refresh 之前为空）
-await models.refresh('llamacpp');        // 获取单个 provider 的列表；失败时 reject
-await models.refresh();                  // 并发刷新所有 provider，尽力而为
+await models.refresh({ providers: ['llamacpp'] }); // 刷新单个 provider
+await models.refresh();                            // 并发刷新所有 provider，尽力而为
 const fresh = models.getModel('llamacpp', 'qwen3-30b');
 ```
 
@@ -353,6 +355,8 @@ if (modelAuth) {
 
 这两个重载都会解析凭据、在必要时刷新过期的 OAuth，并可能返回由认证派生的 `apiKey`、`headers` 或 `baseUrl`。对未配置的 provider，`getAuth()` 解析为 `undefined`；当真正出问题时会以 `ModelsError` reject（`"oauth"`：token 刷新失败，凭据保留以便重新登录；`"auth"`：key 解析或 credential store 失败）。请求路径会以 stream 错误的形式呈现同样的失败。
 
+`getAuth()`、`checkAuth()`、`getAvailable()`、登录和登出都通过各自已有的选项或 interaction 对象接受调用方的可选取消信号，未提供时没有时间上限。provider 的 `login`、`ApiKeyAuth.check`、`ApiKeyAuth.resolve` 和 `OAuthAuth.refresh` 实现总会收到一个具体的 signal，并且必须在阻塞式工作中遵守它。
+
 ### 转换请求 Headers
 
 `Models.stream()`、`complete()`、`streamSimple()` 和 `completeSimple()` 接受一个仅属于 Models 层的 `transformHeaders` 选项。它在 provider 认证、`model.headers` 和显式的 `options.headers` 合并完成之后、provider 分发之前运行一次：
@@ -389,7 +393,7 @@ const models = createModels({ credentials: myFileBackedStore });
 // const models = builtinModels({ credentials: myFileBackedStore });
 ```
 
-契约很小：`read(providerId)`、返回非敏感 `{ providerId, type }` 元数据的 `list()`、`modify(providerId, fn)`（唯一的写路径——串行化的 read-modify-write）和 `delete(providerId)`。枚举操作绝不能解析 secret 或执行配置的 key 命令。OAuth token 刷新在 `modify` 内部运行，因此并发请求和进程不可能对一个已轮换的 token 重复刷新。存储的凭据*拥有*它的 provider：只有在没有存储任何凭据时才会查询环境变量，且刷新失败绝不会静默回退到环境变量中的 key。
+契约很小：`read(providerId)`、返回非敏感 `{ providerId, type }` 元数据的 `list()`、`modify(providerId, fn)`（唯一的写路径——串行化的 read-modify-write）和 `delete(providerId)`。每个操作都接受可选的取消选项。枚举操作绝不能解析 secret 或执行配置的 key 命令。OAuth token 刷新在 `modify` 内部运行，因此并发请求和进程不可能对一个已轮换的 token 重复刷新。存储的凭据*拥有*它的 provider：只有在没有存储任何凭据时才会查询环境变量，且刷新失败绝不会静默回退到环境变量中的 key。
 
 API-key 凭据与 pi 的 `auth.json` 使用相同的 discriminator，并可以携带 provider 作用域的 env/config 值：
 
@@ -426,6 +430,7 @@ const credential = {
 | xAI | `XAI_API_KEY` |
 | Fireworks | `FIREWORKS_API_KEY` |
 | Together AI | `TOGETHER_API_KEY` |
+| Baseten | `BASETEN_API_KEY` |
 | OpenRouter | `OPENROUTER_API_KEY` |
 | Vercel AI Gateway | `AI_GATEWAY_API_KEY` |
 | ZAI Coding Plan (Global) | `ZAI_API_KEY` |
@@ -436,13 +441,18 @@ const credential = {
 | Hugging Face | `HF_TOKEN` |
 | OpenCode Zen / OpenCode Go | `OPENCODE_API_KEY` |
 | Kimi For Coding | `KIMI_API_KEY` |
+| Qwen Token Plan（既有目录） | `QWEN_TOKEN_PLAN_API_KEY` |
+| Qwen Token Plan（个人版） | `QWEN_TOKEN_PLAN_API_KEY` |
+| Qwen Token Plan（中国版） | `QWEN_TOKEN_PLAN_CN_API_KEY` |
 | Xiaomi MiMo (API billing) | `XIAOMI_API_KEY` |
 | Xiaomi MiMo Token Plan (China) | `XIAOMI_TOKEN_PLAN_CN_API_KEY` |
 | Xiaomi MiMo Token Plan (Amsterdam) | `XIAOMI_TOKEN_PLAN_AMS_API_KEY` |
 | Xiaomi MiMo Token Plan (Singapore) | `XIAOMI_TOKEN_PLAN_SGP_API_KEY` |
 | GitHub Copilot | `COPILOT_GITHUB_TOKEN` |
 
-Amazon Bedrock 解析环境中的 AWS 凭据（`AWS_PROFILE`、access key 对、`AWS_BEARER_TOKEN_BEDROCK`、ECS 任务角色、web identity token）。Vertex AI 解析显式 key，或 gcloud Application Default Credentials 加上 project/location。
+`qwen-token-plan-individual` 和 `qwen-token-plan` 共用国际端点和 `QWEN_TOKEN_PLAN_API_KEY`。个人版 provider 只暴露个人版订阅所记载的模型，而既有的那个 provider 保留更宽的目录以向后兼容。存储的凭据仍按 provider 隔离，因此请把 key 存在你实际注册的那个 provider ID 下。
+
+Amazon Bedrock 解析环境中的 AWS 凭据（`AWS_PROFILE`、access key 对、`AWS_BEARER_TOKEN_BEDROCK`、ECS 任务角色、web identity token）；它由 provider 自己实现的登录流程支持 bearer token、AWS profile 以及既有的凭据链。Vertex AI 解析显式 key，或 gcloud Application Default Credentials 加上 project/location，并有一套由 provider 自己实现的登录流程，支持 API key、ADC 和服务账号文件。
 
 ## 工具
 
@@ -475,6 +485,40 @@ const bookMeetingTool: Tool = {
     endTime: Type.String({ format: 'date-time' }),
     attendees: Type.Array(Type.String({ format: 'email' }), { minItems: 1 })
   })
+};
+```
+
+### 工具的受约束采样
+
+工具可以主动启用 provider 侧的受约束采样。对 JSON schema 类工具，`strict: 'prefer'` 会在 provider 支持时使用其严格 schema 强制，否则回退为普通工具调用。`strict: 'require'` 则会在当前 provider/模型无法满足时让请求失败。设置 `constrainedSampling: false` 表示显式不启用，效果与省略该字段相同。
+
+```typescript
+const strictTool: Tool = {
+  name: 'edit_file',
+  description: 'Edit a file',
+  parameters: Type.Object({
+    path: Type.String(),
+    content: Type.String()
+  }, { additionalProperties: false }),
+  constrainedSampling: { type: 'json_schema', strict: 'prefer' }
+};
+```
+
+严格 JSON schema 受约束采样支持 OpenAI、Anthropic、受支持的 Amazon Bedrock Converse 模型、Mistral，以及通过 Google Generative AI 和 Vertex 适配器发起的 Gemini 3 工具调用。Google 使用 `VALIDATED` 函数调用模式（显式要求时使用 `ANY`）；更早的 Gemini 版本在 `strict: 'prefer'` 时回退，并拒绝 `strict: 'require'`，因为它们不强制必填参数。Bedrock 的严格工具能力由模型的结构化输出元数据生成；自定义 Bedrock 模型可以覆盖 `compat.supportsStrictMode`。OpenAI Responses 和 Chat Completions 还能发出受语法约束的自定义工具，支持 OpenAI Lark 或正则语法变体。若同时提供多个 OpenAI 变体，Lark 优先于正则。当前模型支持语法工具时才会强制语法约束；否则该工具回退为普通的函数/JSON schema 处理。语法工具能力属于模型元数据：生成的目录会为那些能透传 OpenAI 自定义工具的端点上的 GPT-5+ 模型设置 `compat.supportsOpenAIGrammarTools`（OpenAI、OpenAI Codex、Azure OpenAI Responses、GitHub Copilot、opencode 和 Cloudflare AI Gateway）。OpenAI 对 GPT-5 之前的模型拒绝 `type: "custom"` 工具，而会规范化工具 schema 的网关（例如 OpenRouter）会把它们弄坏，所以其它地方该标志保持关闭。自定义模型定义可以通过 `compat` 主动启用。具备语法能力的模型会拒绝没有非空受支持变体的语法配置。原生语法工具的参数 schema 必须是对象，且恰好含一个必填的字符串属性：
+
+```typescript
+const patchTool: Tool = {
+  name: 'apply_patch',
+  description: 'Apply a patch',
+  parameters: Type.Object({
+    input: Type.String()
+  }, { additionalProperties: false }),
+  constrainedSampling: {
+    type: 'grammar',
+    variants: {
+      openai_lark: 'start: /.+/s'
+    }
+  }
 };
 ```
 
@@ -749,7 +793,7 @@ console.log(model.output);  // ['image'] 或 ['image', 'text']
 const model = models.getModel('anthropic', 'claude-sonnet-4-5')!;
 // 或 models.getModel('openai', 'gpt-5-mini');
 // 或 models.getModel('google', 'gemini-2.5-flash');
-// 或 models.getModel('xai', 'grok-4.5');
+// 或 models.getModel('xai', 'grok-4.6');
 
 // 检查模型是否支持 reasoning
 if (model.reasoning) {
@@ -838,7 +882,8 @@ for await (const event of s) {
 
 每个 `AssistantMessage` 都包含一个 `stopReason` 字段，指示生成如何结束：
 
-- `"stop"` —— 正常完成，模型完成了它的响应
+- `"pending"` —— 仅出现在部分消息中，此时还不知道最终的停止原因是什么
+- `"stop"` —— 这是模型本轮将产出的最后一条消息
 - `"length"` —— 输出达到了最大 token 限制
 - `"toolUse"` —— 模型正在调用工具并期待工具结果
 - `"error"` —— 生成期间发生错误
@@ -1031,7 +1076,7 @@ const tenantGateway = createProvider({
 });
 ```
 
-动态模型列表使用 `fetchModels`。`Models.refresh()` 会刷新每个已配置的动态 provider，并传入其生效的 API-key 或已刷新的 OAuth 凭据。`ModelsStore` 负责持久化动态目录；这两个 store 都默认为内存实现。
+动态模型列表使用 `fetchModels`。`Models.refresh()` 会刷新每个已配置的动态 provider，并传入其生效的 API-key 或已刷新的 OAuth 凭据。`ModelsStore` 负责持久化动态目录；这两个 store 都默认为内存实现。它的 `read`、`write` 和 `delete` 操作接受可选的取消信号，`Models` 会把这些等待绑定到 provider 的刷新 signal 上。
 
 ```typescript
 const models = createModels({ credentials, modelsStore });
@@ -1049,7 +1094,11 @@ if (result.aborted) console.log('refresh cancelled');
 for (const [provider, error] of result.errors) console.error(provider, error);
 ```
 
-使用 `models.refresh({ allowNetwork: false })` 可以在不访问网络的情况下恢复已持久化的目录，`models.refresh({ force: true })` 则绕过 provider 的新鲜度检查。模型读取保持同步，返回最后一次恢复或刷新的列表。
+`Models.refresh()` 在省略可选 signal 时没有时间上限。provider 总会收到一个具体的 `RefreshModelsContext.signal`，并且必须在网络请求和其它阻塞式工作中遵守它。当调用方提供了 signal 时，即使某个自定义 provider 不配合，`Models.refresh()` 也会在取消后迅速返回 `aborted: true`；但要真正停下底层工作，provider 仍需遵守该 signal。
+
+使用 `models.refresh({ providers: ['openrouter'] })` 可以把工作限定在选定的 provider 上，`models.refresh({ allowNetwork: false })` 可以在不访问网络的情况下恢复已持久化的目录，`models.refresh({ force: true })` 则绕过 provider 的新鲜度检查。模型读取保持同步，返回最后一次恢复或刷新的列表。
+
+`createProvider()` 会自动处理动态发布与持久化。手写的 `Provider.refreshModels()` 实现会收到只读的 `context.stored` 快照，并通过 `context.publish({ persist?, update? })` 发布。省略 `persist` 表示不改动存储，传入 `ModelsStoreEntry` 表示写入，传入 `persist: null` 表示删除。发布带世代校验；同步的内存目录变更应放进 `update`，而不要在发布之前直接改状态。
 
 自定义模型可以携带 `headers`（例如躲在 bot 检测后面的代理）和 `compat` 标志。`Models.getAuth(model)` 会包含这些模型 headers，stream 方法会在显式请求 headers 和 `transformHeaders` 之前合并它们。参见 [OpenAI 兼容性设置](#openai-兼容性设置)。
 
@@ -1124,6 +1173,7 @@ interface OpenAICompletionsCompat {
   supportsReasoningEffort?: boolean; // provider 是否支持 `reasoning_effort`（默认：true）
   supportsUsageInStreaming?: boolean; // provider 是否支持 `stream_options: { include_usage: true }`（默认：true）
   supportsStrictMode?: boolean;      // provider 是否支持工具定义中的 `strict`（默认：true）
+  supportsOpenAIGrammarTools?: boolean; // 是否发出 OpenAI 自定义 Lark/正则语法工具；为 false 时回退到普通函数工具（默认：false；生成的目录会为有能力的模型启用）
   sendSessionAffinityHeaders?: boolean; // 是否根据 `sessionId` 发送会话亲和（session-affinity）数据（默认：false）
   sessionAffinityFormat?: 'openai' | 'openai-nosession' | 'openrouter'; // 会话亲和的格式：'openai' 使用 `prompt_cache_key`、`session_id`、`x-client-request-id` 和 `x-session-affinity`；'openai-nosession' 使用 `prompt_cache_key`、`x-client-request-id` 和 `x-session-affinity`；'openrouter' 使用 `x-session-id`（默认：自动检测）
   maxTokensField?: 'max_completion_tokens' | 'max_tokens';  // 使用哪个字段名（默认：max_completion_tokens）
@@ -1131,8 +1181,11 @@ interface OpenAICompletionsCompat {
   requiresAssistantAfterToolResult?: boolean; // 工具结果后是否必须跟一条 assistant 消息（默认：false）
   requiresThinkingAsText?: boolean;  // thinking 块是否必须转换为文本（默认：false）
   requiresReasoningContentOnAssistantMessages?: boolean; // 启用 reasoning 时，所有重放的 assistant 消息是否必须带空的 reasoning_content（默认：对 DeepSeek 自动检测）
-  thinkingFormat?: 'openai' | 'openrouter' | 'deepseek' | 'together' | 'zai' | 'qwen' | 'chat-template' | 'qwen-chat-template' | 'string-thinking' | 'ant-ling'; // reasoning 参数的格式：'openai' 使用 reasoning_effort，'openrouter' 使用 reasoning: { effort }，'deepseek' 使用 thinking: { type } 且在支持时加 reasoning_effort，'together' 使用 reasoning: { enabled } 且在支持时加 reasoning_effort，'zai' 使用 thinking: { type }，'qwen' 使用 enable_thinking，'chat-template' 使用可配置的 chat_template_kwargs，'qwen-chat-template' 使用 chat_template_kwargs.enable_thinking 和 preserve_thinking，'string-thinking' 使用顶层 thinking，'ant-ling' 只对已映射的 effort 使用 reasoning: { effort }（默认：openai）
-  chatTemplateKwargs?: Record<string, string | number | boolean | null | { '$var': 'thinking.enabled' | 'thinking.effort'; omitWhenOff?: boolean }>; // chat_template_kwargs 的值；用 $var 引用 pi 控制的 thinking 值
+  thinkingFormat?: 'openai' | 'openrouter' | 'deepseek' | 'together' | 'baseten' | 'zai' | 'qwen' | 'chat-template' | 'qwen-chat-template' | 'string-thinking' | 'ant-ling'; // reasoning 参数的格式：'openai' 使用 reasoning_effort，'openrouter' 使用 reasoning: { effort }，'deepseek' 使用 thinking: { type } 且在支持时加 reasoning_effort，'together' 使用 reasoning: { enabled } 且在支持时加 reasoning_effort，'baseten' 使用可配置的 chat_template_args 且在支持时加 reasoning_effort，'zai' 使用 thinking: { type }，'qwen' 使用 enable_thinking，'chat-template' 使用可配置的 chat_template_kwargs，'qwen-chat-template' 使用 chat_template_kwargs.enable_thinking 和 preserve_thinking，'string-thinking' 使用顶层 thinking，'ant-ling' 只对已映射的 effort 使用 reasoning: { effort }（默认：openai）
+  chatTemplateKwargs?: Record<string, string | number | boolean | null | { '$var': 'thinking.enabled' | 'thinking.effort' | 'thinking.budget'; omitWhenOff?: boolean }>; // chat_template_kwargs 的值；用 $var 引用 pi 控制的 thinking 值
+  chatTemplateArgs?: Record<string, string | number | boolean | null | { '$var': 'thinking.enabled' | 'thinking.effort' | 'thinking.budget'; omitWhenOff?: boolean }>; // thinkingFormat: 'baseten' 使用的 chat_template_args 值；用 $var 引用 pi 控制的 thinking 值
+  thinkingTokenBudgetField?: 'thinking_token_budget' | 'thinking_budget' | 'thinking_budget_tokens'; // 用 thinkingBudgets 为 reasoning token 设上限的顶层字段（vLLM / Qwen / llama.cpp）。默认关闭。
+  supportsThinkingTokenBudget?: boolean; // thinkingTokenBudgetField: 'thinking_token_budget'（vLLM）的别名。建议优先用 thinkingTokenBudgetField。默认：false。
   cacheControlFormat?: 'anthropic';  // 在 system prompt、最后一个工具和最后的 user/assistant 文本内容上使用 Anthropic 风格的 cache_control
   openRouterRouting?: OpenRouterRouting; // OpenRouter 路由偏好（默认：{}）
   vercelGatewayRouting?: VercelGatewayRouting; // Vercel AI Gateway 路由偏好（默认：{}）
@@ -1142,6 +1195,8 @@ interface OpenAIResponsesCompat {
   supportsDeveloperRole?: boolean;   // provider 支持 `developer` 角色还是 `system`（默认：true）
   sessionAffinityFormat?: 'openai' | 'openai-nosession' | 'openrouter'; // 会话亲和 header 的格式：'openai' 发送 `session_id` 和 `x-client-request-id`；'openai-nosession' 发送 `x-client-request-id`；'openrouter' 发送 `x-session-id`。不影响 body 参数 `prompt_cache_key`（默认：自动检测）
   supportsLongCacheRetention?: boolean; // provider 是否支持 `prompt_cache_retention: "24h"`（默认：true）
+  supportsStrictMode?: boolean;      // provider 是否支持严格 JSON schema 的函数工具（默认：false；内置 OpenAI 模型在元数据中已启用）
+  supportsOpenAIGrammarTools?: boolean; // 是否发出 OpenAI 自定义 Lark/正则语法工具；为 false 时回退到普通函数工具（默认：false；生成的目录会为有能力的模型启用）
 }
 ```
 
@@ -1422,8 +1477,9 @@ const response = await models.complete(model, context, {
 - **Anthropic**（Claude Pro/Max 订阅）
 - **OpenAI Codex**（ChatGPT Plus/Pro 订阅，可访问 GPT-5.x Codex 模型）
 - **GitHub Copilot**（Copilot 订阅）
+- **OpenRouter**（OAuth PKCE，生成一个由用户掌控的 API key）
 
-这些 provider 都在 `provider.auth.oauth` 上携带一个 `OAuthAuth`，包含三个操作：`login(interaction)` 使用与 provider 无关的 `AuthInteraction.prompt()`/`notify()` 协议并返回凭据，`refresh(credential)` 交换 refresh token，`toAuth(credential)` 派生请求认证（GitHub Copilot 的按账号 base URL 就来自这里）。刷新是自动的：`models.getAuth(providerId)` 和请求路径会在 credential store 锁内刷新过期的 token，因此并发请求和进程不会重复刷新。
+这些 provider 都在 `provider.auth.oauth` 上携带一个 `OAuthAuth`，包含三个操作：`login(interaction)` 使用与 provider 无关的 `AuthInteraction.prompt()`/`notify()` 协议并返回凭据，`refresh(credential, signal)` 在适用时刷新即将过期的凭据，`toAuth(credential)` 派生请求认证（GitHub Copilot 的按账号 base URL 就来自这里）。provider 的登录 interaction 和刷新调用总会带上一个具体的 abort signal。刷新是自动的：`models.getAuth(providerId)` 和请求路径会在 credential store 锁内刷新过期的 token，因此并发请求和进程不会重复刷新。OpenRouter 的 OAuth 流程返回的是一个永久 API key，因此它的刷新操作是空操作。
 
 ```typescript
 import { createModels } from '@earendil-works/pi-ai';
@@ -1499,7 +1555,7 @@ npx @earendil-works/pi-ai list               # 列出可用 provider
 
 Provider 说明：
 
-**OpenAI Codex**：需要 ChatGPT Plus 或 Pro 订阅。提供对 GPT-5.x Codex 模型的访问，具有扩展的上下文窗口和 reasoning 能力。当 stream 选项中提供 `sessionId` 时，库会自动处理基于会话的 prompt caching。可以在 stream 选项中把 `transport` 设为 `"sse"`、`"websocket"` 或 `"auto"` 来选择 Codex Responses 的传输方式。使用 WebSocket 且带 `sessionId` 时，连接按会话复用，闲置 5 分钟后过期。
+**OpenAI Codex**：需要 ChatGPT Plus 或 Pro 订阅。提供对 GPT-5.x Codex 模型的访问，具有扩展的上下文窗口和 reasoning 能力。当 stream 选项中提供 `sessionId` 时，除非 `cacheRetention` 为 `"none"`，库会自动处理基于会话的 prompt caching。可以在 stream 选项中把 `transport` 设为 `"sse"`、`"websocket"` 或 `"auto"` 来选择 Codex Responses 的传输方式。使用 WebSocket 且带 `sessionId` 并启用了缓存保留时，连接按会话复用，闲置 5 分钟后过期。
 
 **Azure OpenAI (Responses)**：仅使用 Responses API。设置 `AZURE_OPENAI_API_KEY` 以及 `AZURE_OPENAI_BASE_URL` 或 `AZURE_OPENAI_RESOURCE_NAME` 之一。`AZURE_OPENAI_BASE_URL` 同时支持 `https://<resource>.openai.azure.com` 和 `https://<resource>.cognitiveservices.azure.com`；根端点会自动规范化为 `.../openai/v1`。需要时可用 `AZURE_OPENAI_API_VERSION`（默认 `v1`）覆盖 API 版本。部署名默认按模型 ID 处理，可用 `azureDeploymentName` 或 `AZURE_OPENAI_DEPLOYMENT_NAME_MAP` 覆盖，格式为逗号分隔的 `model-id=deployment` 对（例如 `gpt-4o-mini=my-deployment,gpt-4o=prod`）。有意不支持旧式基于 deployment 的 URL。
 
@@ -1533,7 +1589,7 @@ compat 是根入口点的严格超集，所以一个文件可以整体切换 imp
 
 ### 添加新 Provider
 
-添加一个新的 LLM provider 需要跨多个文件的更改。分层布局：API 实现位于 `src/api/`，provider 工厂位于 `src/providers/`，生成的目录位于 `src/providers/<id>.models.ts`。此清单涵盖所有必需步骤：
+添加一个新的 LLM provider 需要跨多个文件的更改。分层布局：API 实现位于 `src/api/`，provider 工厂位于 `src/providers/`，稳定的生成目录包装器位于 `src/providers/<id>.models.ts`，并由 `src/models.generated.ts` 完成注册。此清单涵盖所有必需步骤：
 
 #### 1. 核心类型（`src/types.ts`）
 
@@ -1555,7 +1611,7 @@ compat 是根入口点的严格超集，所以一个文件可以整体切换 imp
 #### 3. 模型生成（`scripts/generate-models.ts`、`scripts/generate-image-models.ts`）
 
 - 添加从 provider 数据源（如 models.dev API）获取和解析模型的逻辑
-- 通过 `scripts/generate-models.ts` 把聊天/支持工具的 provider 模型数据映射到标准化的 `Model` 接口；重新生成会输出 `src/providers/<id>.models.ts` 和聚合器
+- 通过 `scripts/generate-models.ts` 把聊天/支持工具的 provider 模型数据映射到标准化的 `Model` 接口；hydration 会按 API 对被忽略的 `src/providers/data/<id>.json` 值进行分组，而稳定的 `src/providers/<id>.models.ts` 包装器会直接从这些 JSON key 推导精确的模型/API 类型
 - 通过 `scripts/generate-image-models.ts` 把图片生成 provider 的模型数据映射到标准化的 `ImagesModel` 接口
 - 处理 provider 特定的怪癖（定价格式、能力标志、模型 ID 转换）
 

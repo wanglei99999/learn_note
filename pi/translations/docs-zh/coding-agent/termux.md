@@ -1,4 +1,4 @@
-> **译文** | 原文：[`packages/coding-agent/docs/termux.md`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/termux.md) · 版本：v0.80.10（`eb8dd587`）· 译于 2026-08-02
+> **译文** | 原文：[`packages/coding-agent/docs/termux.md`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/termux.md) · 版本：v0.84.2（`5cd93f688`）· 译于 2026-08-02
 
 # Termux（Android）配置
 

@@ -1,4 +1,4 @@
-> **译文** | 原文：[`packages/coding-agent/docs/sdk.md`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/sdk.md) · 版本：v0.80.10（`eb8dd587`）· 译于 2026-08-02
+> **译文** | 原文：[`packages/coding-agent/docs/sdk.md`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/sdk.md) · 版本：v0.84.2（`5cd93f688`）· 译于 2026-08-02 · 更新于 2026-08-21
 
 > pi 可以帮助你使用 SDK。让它为你的使用场景构建一个集成即可。
 
@@ -321,6 +321,9 @@ session.subscribe((event) => {
     case "compaction_end":
     case "auto_retry_start":
     case "auto_retry_end":
+    case "summarization_retry_scheduled":
+    case "summarization_retry_attempt_start":
+    case "summarization_retry_finished":
       break;
   }
 });
@@ -371,6 +374,13 @@ import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 
 const modelRuntime = await ModelRuntime.create();
 
+// create() 会恢复缓存的模型目录，但默认不会从 pi.dev 刷新它们。
+// 可以显式开启创建时的网络刷新，并限定它最多耗时多久：
+const refreshedRuntime = await ModelRuntime.create({
+  allowModelNetwork: true,
+  modelRefreshTimeoutMs: 15_000,
+});
+
 // 查找特定的内置模型（不检查 API key 是否存在）
 const opus = getModel("anthropic", "claude-opus-4-5");
 if (!opus) throw new Error("Model not found");
@@ -400,6 +410,8 @@ const { session } = await createAgentSession({
 1. 尝试从 session 恢复（如果是继续会话）
 2. 使用设置中的默认模型
 3. 回退到第一个可用模型
+
+远程模型目录会持久化到本地，这样后续的 runtime 无需发起网络请求即可恢复它们。默认文件是 `~/.pi/agent/models-store.json`；设置 `modelsStorePath` 可以换一个位置，或者注入 `modelsStore` 自行控制持久化。除非强制刷新，否则每个 provider 的网络刷新会被限流为每四小时一次。若要立刻强制刷新，调用 `await modelRuntime.refresh({ allowNetwork: true, force: true, signal })`。设置 `PI_OFFLINE` 会禁用模型相关的网络访问。
 
 若要与 CLI 的模型解析行为保持一致，使用导出的解析辅助函数：
 
@@ -451,7 +463,7 @@ for (const provider of modelRuntime.getProviders()) {
 }
 
 // 运行时 API key 覆盖（不持久化到磁盘）
-modelRuntime.setRuntimeApiKey("anthropic", "sk-my-temp-key");
+await modelRuntime.setRuntimeApiKey("anthropic", "sk-my-temp-key");
 
 // 自定义凭据和模型文件位置
 const customRuntime = await ModelRuntime.create({
@@ -467,6 +479,24 @@ const { session } = await createAgentSession({
   modelRuntime: customRuntime,
 });
 ```
+
+`login()`、`logout()`、`setRuntimeApiKey()` 和 `removeRuntimeApiKey()` 会在受影响 provider 的缓存/内置目录、组合结果与可用性快照在本地达成一致之后才 resolve。它们不会等待远程目录刷新到最新。如果凭据已经提交但本地同步失败，它们会以导出的 `CredentialSynchronizationError` reject；此时应检查它的 `providerId`、`operation`、`credential` 和 `cause` 字段，而不是盲目重试凭据变更。
+
+公开的模型/认证操作以及 `ModelRuntime.create({ signal })` 都接受可选的 abort signal；不传时它们没有时间上限。远程目录的新鲜度策略由 SDK 应用自己决定：
+
+```typescript
+const signal = AbortSignal.timeout(15_000);
+const result = await modelRuntime.refresh({
+  providers: ["anthropic"],
+  signal,
+});
+if (result.aborted) console.warn("Catalog refresh timed out; using cached models");
+for (const [providerId, error] of result.errors) {
+  console.warn(`Could not refresh ${providerId}:`, error);
+}
+```
+
+网络刷新失败或超时，不会回滚已经成功的凭据操作。`refresh()` 会开启一个新的 provider 世代，因此它不会排在某次卡住的旧刷新后面等待，过期世代之后也无法再发布结果。
 
 > 参见 [examples/sdk/09-api-keys-and-oauth.ts](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/examples/sdk/09-api-keys-and-oauth.ts)
 
@@ -599,7 +629,7 @@ await loader.reload();
 const { session } = await createAgentSession({ resourceLoader: loader });
 ```
 
-Extension 可以注册工具、订阅事件、添加命令等。完整 API 见 [extensions.md](extensions.md)。
+Extension 可以注册工具、订阅事件、添加命令等。完整 API 见 [extensions.md](19.extensions.md)。
 
 **具名内联 extension：** 默认情况下，内联工厂在启动时的 Extensions 列表中显示为 `<inline:1>`、`<inline:2>` 等。若要显示描述性名称，将工厂包装一下：
 
@@ -636,7 +666,7 @@ await loader.reload();
 eventBus.on("my-extension:status", (data) => console.log(data));
 ```
 
-> 参见 [examples/sdk/06-extensions.ts](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/examples/sdk/06-extensions.ts) 和 [docs/extensions.md](extensions.md)
+> 参见 [examples/sdk/06-extensions.ts](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/examples/sdk/06-extensions.ts) 和 [docs/extensions.md](19.extensions.md)
 
 ### Skills
 
@@ -819,7 +849,7 @@ sm.branchWithSummary(id, "Summary...");  // 带上下文摘要的分支
 sm.createBranchedSession(leafId);       // 将路径提取为新文件
 ```
 
-> 参见 [examples/sdk/11-sessions.ts](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/examples/sdk/11-sessions.ts) 和 [Session 格式](session-format.md)
+> 参见 [examples/sdk/11-sessions.ts](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/examples/sdk/11-sessions.ts) 和 [Session 格式](09.session-format.md)
 
 ### 设置管理
 
@@ -937,7 +967,7 @@ const modelRuntime = await ModelRuntime.create({
   modelsPath: "/custom/agent/models.json",
 });
 if (process.env.MY_KEY) {
-  modelRuntime.setRuntimeApiKey("anthropic", process.env.MY_KEY);
+  await modelRuntime.setRuntimeApiKey("anthropic", process.env.MY_KEY);
 }
 
 // 内联工具
@@ -1143,6 +1173,7 @@ AgentSessionRuntime
 // 认证与模型
 ModelRuntime // 实现 pi-ai 的 Models 接口，并负责凭据存储
 ModelRegistry // 同步的 extension 兼容门面
+CredentialSynchronizationError
 resolveCliModel
 resolveModelScopeWithDiagnostics
 
@@ -1182,4 +1213,4 @@ type PromptTemplate
 type Tool
 ```
 
-Extension 相关类型的完整 API 见 [extensions.md](extensions.md)。
+Extension 相关类型的完整 API 见 [extensions.md](19.extensions.md)。

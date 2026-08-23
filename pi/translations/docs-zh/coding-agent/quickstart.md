@@ -1,4 +1,4 @@
-> **译文** | 原文：[`packages/coding-agent/docs/quickstart.md`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/quickstart.md) · 版本：v0.80.10（`eb8dd587`）· 译于 2026-08-02
+> **译文** | 原文：[`packages/coding-agent/docs/quickstart.md`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/quickstart.md) · 版本：v0.84.2（`5cd93f688`）· 译于 2026-08-02 · 更新于 2026-08-21
 
 # 快速上手
 
@@ -66,7 +66,7 @@ pi
 
 也可以运行 `/login` 并选择一个 API key 类 provider，把 key 保存到 `~/.pi/agent/auth.json`。
 
-所有受支持的 provider、环境变量以及云 provider 配置，请参见 [Provider](providers.md)。
+所有受支持的 provider、环境变量以及云 provider 配置，请参见 [Provider](03.providers.md)。
 
 ## 第一个 session
 
@@ -101,6 +101,8 @@ Pi 会加载：
 
 - `~/.pi/agent/AGENTS.md`：全局指令
 - 各上级目录以及当前目录中的 `AGENTS.md` 或 `CLAUDE.md`
+
+如果某个目录中存在 `AGENTS.override.md`，Pi 会加载它，而不加载该目录下的 `AGENTS.md` 或 `CLAUDE.md`。
 
 修改上下文文件后，重启 pi 或运行 `/reload`。
 
@@ -158,10 +160,10 @@ pi -p @screenshot.png "What's in this image?"
 
 ## 下一步
 
-- [使用 Pi](usage.md) - 交互模式、斜杠命令、session、上下文文件与 CLI 参考。
-- [Provider](providers.md) - 认证与模型配置。
-- [设置](settings.md) - 全局与项目配置。
-- [快捷键](keybindings.md) - 快捷键与自定义。
-- [Pi 包](packages.md) - 安装共享的 extension、skill、提示词与主题。
+- [使用 Pi](02.usage.md) - 交互模式、斜杠命令、session、上下文文件与 CLI 参考。
+- [Provider](03.providers.md) - 认证与模型配置。
+- [设置](11.settings.md) - 全局与项目配置。
+- [快捷键](17.keybindings.md) - 快捷键与自定义。
+- [Pi 包](18.packages.md) - 安装共享的 extension、skill、提示词与主题。
 
 平台说明：[Windows](windows.md)、[Termux](termux.md)、[tmux](tmux.md)、[终端配置](terminal-setup.md)、[Shell 别名](shell-aliases.md)。

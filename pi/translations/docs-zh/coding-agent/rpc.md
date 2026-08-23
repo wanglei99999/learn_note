@@ -1,4 +1,4 @@
-> **译文** | 原文：[`packages/coding-agent/docs/rpc.md`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc.md) · 版本：v0.80.10（`eb8dd587`）· 译于 2026-08-02
+> **译文** | 原文：[`packages/coding-agent/docs/rpc.md`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc.md) · 版本：v0.84.2（`5cd93f688`）· 译于 2026-08-02 · 更新于 2026-08-21
 
 # RPC 模式
 
@@ -25,7 +25,7 @@ pi --mode rpc [options]
 - **响应（Responses）**：`type: "response"` 的 JSON 对象，表示命令成功/失败
 - **事件（Events）**：以 JSON 行的形式流式输出到 stdout 的 agent 事件
 
-所有命令都支持可选的 `id` 字段，用于请求/响应关联。如果提供了 `id`，对应的响应会包含相同的 `id`。
+所有命令都支持可选的 `id` 字段，用于请求/响应关联。如果提供了 `id`，对应的响应会包含相同的 `id`。`bash_execution_update` 事件也会包含发起它的 `bash` 命令的 `id`。
 
 ### 帧格式（Framing）
 
@@ -315,6 +315,26 @@ RPC 模式使用严格的 JSONL 语义，仅以 LF（`\n`）作为记录分隔�
 }
 ```
 
+#### get_available_thinking_levels
+
+列出当前模型支持的思考级别。不支持推理的模型返回 `["off"]`。
+
+```json
+{"type": "get_available_thinking_levels"}
+```
+
+响应：
+```json
+{
+  "type": "response",
+  "command": "get_available_thinking_levels",
+  "success": true,
+  "data": {
+    "levels": ["off", "minimal", "low", "medium", "high"]
+  }
+}
+```
+
 ### 队列模式
 
 #### set_steering_mode
@@ -377,12 +397,20 @@ RPC 模式使用严格的 JSONL 语义，仅以 LF（`\n`）作为记录分隔�
     "firstKeptEntryId": "abc123",
     "tokensBefore": 150000,
     "estimatedTokensAfter": 32000,
+    "usage": {
+      "input": 32000,
+      "output": 1200,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "totalTokens": 33200,
+      "cost": {"input": 0.01, "output": 0.02, "cacheRead": 0, "cacheWrite": 0, "total": 0.03}
+    },
     "details": {}
   }
 }
 ```
 
-`estimatedTokensAfter` 是对压缩后立即重建的消息上下文的启发式估算，并非 provider 精确的 token 计数。
+`estimatedTokensAfter` 是对压缩后立即重建的消息上下文的启发式估算，并非 provider 精确的 token 计数。`usage` 报告生成摘要的一次或多次 LLM 调用；自定义上下文压缩处理器可能省略该字段。
 
 #### set_auto_compaction
 
@@ -429,15 +457,18 @@ RPC 模式使用严格的 JSONL 语义，仅以 LF（`\n`）作为记录分隔�
 
 #### bash
 
-执行一条 shell 命令，并将输出加入对话上下文。
+执行一条 shell 命令，并将输出加入对话上下文。命令运行时，输出通过 `bash_execution_update` 事件流式发送；响应中包含最终结果。
 
 ```json
-{"type": "bash", "command": "ls -la"}
+{"id": "req-1", "type": "bash", "command": "ls -la"}
 ```
+
+包含 `id`，即可将流式 `bash_execution_update` 事件与该命令关联起来。
 
 响应：
 ```json
 {
+  "id": "req-1",
   "type": "response",
   "command": "bash",
   "success": true,
@@ -468,7 +499,7 @@ RPC 模式使用严格的 JSONL 语义，仅以 LF（`\n`）作为记录分隔�
 
 **bash 结果如何进入 LLM：**
 
-`bash` 命令立即执行并返回 `BashResult`。在内部会创建一个 `BashExecutionMessage` 并存入 agent 的消息状态。这条消息**不会**发出事件。
+`bash` 命令立即执行并返回 `BashResult`。在内部会创建一个 `BashExecutionMessage` 并存入 agent 的消息状态。
 
 当下一个 `prompt` 命令发出时，所有消息（包括 `BashExecutionMessage`）在发送给 LLM 之前会被转换。`BashExecutionMessage` 会被转换成如下格式的 `UserMessage`：
 
@@ -483,7 +514,6 @@ drwxr-xr-x ...
 这意味着：
 1. bash 输出会在**下一个 prompt** 时进入 LLM 上下文，而不是立即进入
 2. 在一次 prompt 之前可以执行多条 bash 命令；所有输出都会被包含
-3. `BashExecutionMessage` 本身不会发出任何事件
 
 #### abort_bash
 
@@ -539,7 +569,7 @@ drwxr-xr-x ...
 }
 ```
 
-`tokens` 包含当前会话状态下助手用量的累计值。`contextUsage` 包含实际的当前上下文窗口估算，用于上下文压缩判断与页脚显示。
+`tokens` 和 `cost` 包含整个 session 中的助手消息、工具报告的用量，以及上下文压缩/分支摘要生成用量。`contextUsage` 包含实际的当前上下文窗口估算，用于上下文压缩判断与页脚显示。
 
 没有可用模型或上下文窗口时，`contextUsage` 会被省略。上下文压缩刚完成后，在压缩后的新助手响应提供有效用量数据之前，`contextUsage.tokens` 和 `contextUsage.percent` 为 `null`。
 
@@ -803,7 +833,7 @@ drwxr-xr-x ...
 
 ## 事件
 
-在 agent 运行期间，事件以 JSON 行的形式流式输出到 stdout。事件**不**包含 `id` 字段（只有响应才有）。
+在 agent 运行期间，事件以 JSON 行的形式流式输出到 stdout。事件通常不包含 `id` 字段；如果发起 `bash` 命令时提供了 `id`，`bash_execution_update` 会包含该命令的 `id`。
 
 ### 事件类型
 
@@ -817,6 +847,7 @@ drwxr-xr-x ...
 | `message_start` | 消息开始 |
 | `message_update` | 流式更新（文本/思考/工具调用增量） |
 | `message_end` | 消息完成 |
+| `bash_execution_update` | 直接 RPC bash 命令的输出片段 |
 | `tool_execution_start` | 工具开始执行 |
 | `tool_execution_update` | 工具执行进度（流式输出） |
 | `tool_execution_end` | 工具执行完成 |
@@ -825,6 +856,9 @@ drwxr-xr-x ...
 | `compaction_end` | 上下文压缩完成 |
 | `auto_retry_start` | 自动重试开始（在瞬时错误之后） |
 | `auto_retry_end` | 自动重试结束（成功或最终失败） |
+| `summarization_retry_scheduled` | 因上下文压缩或分支摘要的瞬时错误而安排摘要重试 |
+| `summarization_retry_attempt_start` | 开始重试摘要请求 |
+| `summarization_retry_finished` | 摘要重试循环结束 |
 | `extension_error` | extension 抛出错误 |
 
 ### agent_start
@@ -882,17 +916,23 @@ agent 开始处理 prompt 时发出。
 
 ### message_update（streaming）
 
-在助手消息流式输出期间发出。同时包含部分消息和一个流式增量事件。
+在助手消息流式输出期间发出。包含增量事件，不包含累计消息快照。
 
 ```json
 {
   "type": "message_update",
-  "message": {...},
+  "usage": {
+    "input": 100,
+    "output": 1,
+    "cacheRead": 0,
+    "cacheWrite": 0,
+    "totalTokens": 101,
+    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0}
+  },
   "assistantMessageEvent": {
     "type": "text_delta",
     "contentIndex": 0,
-    "delta": "Hello ",
-    "partial": {...}
+    "delta": "Hello "
   }
 }
 ```
@@ -901,25 +941,45 @@ agent 开始处理 prompt 时发出。
 
 | 类型 | 描述 |
 |------|-------------|
-| `start` | 消息生成开始 |
 | `text_start` | 文本内容块开始 |
 | `text_delta` | 文本内容片段 |
 | `text_end` | 文本内容块结束 |
 | `thinking_start` | 思考块开始 |
 | `thinking_delta` | 思考内容片段 |
 | `thinking_end` | 思考块结束 |
-| `toolcall_start` | 工具调用开始 |
+| `toolcall_start` | 工具调用开始（包含 `id` 和 `toolName`） |
 | `toolcall_delta` | 工具调用参数片段 |
 | `toolcall_end` | 工具调用结束（包含完整的 `toolCall` 对象） |
-| `done` | 消息完成（原因：`"stop"`、`"length"`、`"toolUse"`） |
-| `error` | 发生错误（原因：`"aborted"`、`"error"`） |
 
 流式输出一段文本响应的示例：
 ```json
-{"type":"message_update","message":{...},"assistantMessageEvent":{"type":"text_start","contentIndex":0,"partial":{...}}}
-{"type":"message_update","message":{...},"assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Hello","partial":{...}}}
-{"type":"message_update","message":{...},"assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":" world","partial":{...}}}
-{"type":"message_update","message":{...},"assistantMessageEvent":{"type":"text_end","contentIndex":0,"content":"Hello world","partial":{...}}}
+{"type":"message_update","usage":{...},"assistantMessageEvent":{"type":"text_start","contentIndex":0}}
+{"type":"message_update","usage":{...},"assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Hello"}}
+{"type":"message_update","usage":{...},"assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":" world"}}
+{"type":"message_update","usage":{...},"assistantMessageEvent":{"type":"text_end","contentIndex":0,"content":"Hello world"}}
+```
+
+顶层 `usage` 字段包含 provider 最新报告的累计用量。如果 provider 在 streaming 期间不报告用量，该字段在完成前可能一直为零。
+
+工具调用开始示例：
+```json
+{"type":"message_update","usage":{...},"assistantMessageEvent":{"type":"toolcall_start","contentIndex":1,"id":"call_abc123","toolName":"write"}}
+```
+
+`message_update` 有意省略了原来的累计 `message` 字段和 `assistantMessageEvent.partial`。需要实时部分消息的客户端必须从 `message_start` 开始，根据后续事件的 `contentIndex` 自行组装。以 `message_end.message` 为准。对于工具调用，`toolcall_start` 提供调用的 `id` 和 `toolName`；客户端应缓存 `toolcall_delta.delta` 作为参数。`toolcall_end.toolCall` 包含完成的调用。
+
+### bash_execution_update
+
+直接执行的 `bash` 命令每产生一个输出片段，就会发出一次该事件。`id` 与命令的 `id` 一致，客户端可据此将输出关联到正确的命令。
+
+命令运行期间的全部输出都会通过事件流式发送，即使最终 `bash` 响应中的 `output` 被截断也是如此。
+
+```json
+{
+  "type": "bash_execution_update",
+  "id": "req-1",
+  "delta": "total 48\n"
+}
 ```
 
 ### tool_execution_start / tool_execution_update / tool_execution_end
@@ -998,6 +1058,14 @@ agent 开始处理 prompt 时发出。
     "firstKeptEntryId": "abc123",
     "tokensBefore": 150000,
     "estimatedTokensAfter": 32000,
+    "usage": {
+      "input": 32000,
+      "output": 1200,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "totalTokens": 33200,
+      "cost": {"input": 0.01, "output": 0.02, "cacheRead": 0, "cacheWrite": 0, "total": 0.03}
+    },
     "details": {}
   },
   "aborted": false,
@@ -1040,6 +1108,36 @@ agent 开始处理 prompt 时发出。
   "success": false,
   "attempt": 3,
   "finalError": "529 overloaded_error: Overloaded"
+}
+```
+
+### summarization_retry_scheduled / summarization_retry_attempt_start / summarization_retry_finished
+
+上下文压缩或分支摘要在 provider 瞬时错误后重试时发出。这些事件使用与助手回合自动重试相同的重试设置。
+
+```json
+{
+  "type": "summarization_retry_scheduled",
+  "attempt": 1,
+  "maxAttempts": 3,
+  "delayMs": 2000,
+  "errorMessage": "terminated"
+}
+```
+
+```json
+{
+  "type": "summarization_retry_attempt_start",
+  "source": "compaction",
+  "reason": "threshold"
+}
+```
+
+对于分支摘要，`source` 为 `"branchSummary"`，且没有 `reason`。
+
+```json
+{
+  "type": "summarization_retry_finished"
 }
 ```
 
@@ -1278,6 +1376,7 @@ Extension UI 方法分为两类：
 - [`packages/ai/src/types.ts`](https://github.com/earendil-works/pi/blob/main/packages/ai/src/types.ts) - `Model`、`UserMessage`、`AssistantMessage`、`ToolResultMessage`
 - [`packages/agent/src/types.ts`](https://github.com/earendil-works/pi/blob/main/packages/agent/src/types.ts) - `AgentMessage`、`AgentEvent`
 - [`src/core/messages.ts`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/core/messages.ts) - `BashExecutionMessage`
+- [`src/modes/json-event.ts`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/modes/json-event.ts) - `JsonAgentSessionEvent`
 - [`src/modes/rpc/rpc-types.ts`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/modes/rpc/rpc-types.ts) - RPC 命令/响应类型、extension UI 请求/响应类型
 
 ### Model
@@ -1350,10 +1449,20 @@ Extension UI 方法分为两类：
   "toolCallId": "call_123",
   "toolName": "bash",
   "content": [{"type": "text", "text": "total 48\ndrwxr-xr-x ..."}],
+  "usage": {
+    "input": 100,
+    "output": 50,
+    "cacheRead": 0,
+    "cacheWrite": 0,
+    "totalTokens": 150,
+    "cost": {"input": 0.0003, "output": 0.00075, "cacheRead": 0, "cacheWrite": 0, "total": 0.00105}
+  },
   "isError": false,
   "timestamp": 1733234567890
 }
 ```
+
+`usage` 为可选字段，报告工具内部执行的 LLM 工作。存在时，它会计入 session 的 token 和费用总计。
 
 ### BashExecutionMessage
 
