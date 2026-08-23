@@ -1,12 +1,29 @@
-> **译文** | 原文：[`packages/coding-agent/docs/terminal-setup.md`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/terminal-setup.md) · 版本：v0.80.10（`eb8dd587`）· 译于 2026-08-02
+> **译文** | 原文：[`packages/coding-agent/docs/terminal-setup.md`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/terminal-setup.md) · 版本：v0.84.2（`5cd93f688`）· 译于 2026-08-02 · 更新于 2026-08-21
 
 # 终端设置
 
 Pi 使用 [Kitty 键盘协议](https://sw.kovidgoyal.net/kitty/keyboard-protocol/)来可靠地检测修饰键。大多数现代终端都支持该协议，但有些需要额外配置。
 
-## Kitty、iTerm2
+## Kitty
 
 开箱即用。
+
+## iTerm2
+
+### Regular TUI 模式
+
+开箱即用。
+
+### Fullscreen TUI 模式
+
+此时视口由 pi 接管，因此 iTerm2 会发送鼠标滚轮上报，而不是滚动它自己的原生回滚缓冲区。在 iTerm2 默认的「触控板快速滚动」行为下，这些上报可能丢失加速滚轮增量中的大部分，导致全屏模式下的滚动比常规模式慢得多。
+
+如果在全屏模式下快速滚动手势每次只移动大约一行：
+
+1. 打开 **iTerm2 → Settings → Advanced**。
+2. 搜索 **Trackpad scrolls fast?** 并设为 **No**。
+
+这是一个 iTerm2 全局的绕行方案，可能也会改变原生触控板滚动行为。底层问题记录在 [iTerm2 issue 9619](https://gitlab.com/gnachman/iterm2/-/work_items/9619)。
 
 ## Apple Terminal（macOS 自带终端）
 
@@ -33,6 +50,10 @@ keybind = shift+enter=text:\n
 如果你添加这条映射的唯一原因是 Claude Code 2.x 或更新版本，那么可以删除它；除非你还想在 tmux 中使用 Claude Code——那种场景下仍然需要这条 Ghostty 映射。
 
 Pi 默认将 `Ctrl+J` 绑定为换行别名，因此通过这条重映射，`Shift+Enter` 在 tmux 中也能继续工作，无需额外的 pi 配置。
+
+### Fullscreen TUI 模式
+
+在全屏模式下链接仍然可以点击，但当 pi 捕获鼠标输入时，Ghostty 不会显示悬停下划线和左下角的 URL 预览。在 macOS 上按住 `Shift+Command`、在 Linux 上按住 `Shift+Ctrl`，即可使用 Ghostty 的原生链接处理。
 
 ## WezTerm
 

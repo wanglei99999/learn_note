@@ -27,6 +27,7 @@
 
 | 包 | 描述 |
 |---------|-------------|
+| **[@earendil-works/pi-telemetry](packages/telemetry)** | 与供应商无关的 telemetry 契约、参考适配器、一致性测试和类型化 schema |
 | **[@earendil-works/pi-ai](packages/ai)** | 统一的多 provider LLM API（OpenAI、Anthropic、Google 等） |
 | **[@earendil-works/pi-agent-core](packages/agent)** | 带有 tool calling 和状态管理的 agent 运行时 |
 | **[@earendil-works/pi-coding-agent](packages/coding-agent)** | 交互式 coding agent CLI |

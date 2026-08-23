@@ -1,4 +1,4 @@
-> **译文** | 原文：[`packages/coding-agent/README.md`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/README.md) · 版本：v0.80.10（`eb8dd587`）· 译于 2026-08-02
+> **译文** | 原文：[`packages/coding-agent/README.md`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/README.md) · 版本：v0.84.2（`5cd93f688`）· 译于 2026-08-02 · 更新于 2026-08-21
 
 <p align="center">
   <a href="https://pi.dev">
@@ -18,7 +18,7 @@ Pi 是一个极简的终端 coding harness。让 pi 适配你的工作流，而�
 
 Pi 自带强大的默认配置，但省略了 sub agent 和 plan mode 之类的功能。你可以让 pi 帮你构建想要的功能，或者安装一个符合你工作流的第三方 pi package。
 
-Pi 有四种运行模式：交互式、print 或 JSON、用于进程集成的 RPC，以及用于嵌入到你自己应用中的 SDK。真实世界的 SDK 集成案例参见 [openclaw/openclaw](https://github.com/openclaw/openclaw)。
+Pi 有四种运行模式：交互式、print 或 JSON、用于进程集成的 RPC，以及用于嵌入到你自己应用中的 SDK。
 
 ## 分享你的 OSS coding agent 会话
 
@@ -130,6 +130,7 @@ pi
 - Hugging Face
 - Fireworks
 - Together AI
+- Baseten
 - Kimi For Coding
 - MiniMax
 - Xiaomi MiMo
@@ -137,11 +138,11 @@ pi
 - Xiaomi MiMo Token Plan (Amsterdam)
 - Xiaomi MiMo Token Plan (Singapore)
 
-Pi 还支持 llama.cpp router 服务器。用 `/login llama.cpp` 配置，用 `/llama` 管理下载和已加载的模型，然后用 `/model` 选择一个已加载的模型。设置和用法参见 [llama-cpp.md](./llama-cpp.md)。
+Pi 还支持 llama.cpp router 服务器。用 `/login llama.cpp` 配置，用 `/llama` 管理下载和已加载的模型，然后用 `/model` 选择一个已加载的模型。设置和用法参见 [llama-cpp.md](./04.llama-cpp.md)。
 
-其它 provider 的设置说明参见 [providers.md](./providers.md)。
+其它 provider 的设置说明参见 [providers.md](./03.providers.md)。
 
-**自定义 provider 与模型：** 如果 provider 使用受支持的 API（OpenAI、Anthropic、Google），可通过 `~/.pi/agent/models.json` 添加。对于自定义 API 或 OAuth，请使用 extensions。参见 [models.md](./models.md) 和 [custom-provider.md](./custom-provider.md)。
+**自定义 provider 与模型：** 如果 provider 使用受支持的 API（OpenAI、Anthropic、Google），可通过 `~/.pi/agent/models.json` 添加。对于自定义 API 或 OAuth，请使用 extensions。参见 [models.md](./12.models.md) 和 [custom-provider.md](./13.custom-provider.md)。
 
 ---
 
@@ -154,7 +155,7 @@ Pi 还支持 llama.cpp router 服务器。用 `/login llama.cpp` 配置，用 `/
 - **启动 header** —— 显示快捷键（`/hotkeys` 查看全部）、已加载的 AGENTS.md 文件、prompt templates、skills 和 extensions
 - **消息** —— 你的消息、assistant 回复、工具调用和结果、通知、错误以及 extension UI
 - **编辑器** —— 输入的地方；边框颜色指示 thinking 级别
-- **Footer** —— 工作目录、会话名、总 token/缓存用量（`↑` 输入、`↓` 输出、`R` 缓存读取、`W` 缓存写入、`CH` 最近的缓存命中率）、费用、上下文用量、当前模型
+- **Footer** —— 工作目录、会话名、总 token/缓存用量（`↑` 输入、`↓` 输出、`R` 缓存读取、`W` 缓存写入、`CH` 最近的缓存命中率）、费用、上下文用量、当前模型。这些总计包含 assistant 回复、工具上报的用量以及摘要生成的开销。
 
 编辑器可以被其他 UI 临时替换，比如内置的 `/settings` 或来自 extension 的自定义 UI（例如一个让用户以结构化方式回答模型提问的 Q&A 工具）。[Extensions](#extensions) 还可以替换编辑器，在其上方/下方添加 widget、状态栏、自定义 footer 或 overlay。
 
@@ -169,7 +170,7 @@ Pi 还支持 llama.cpp router 服务器。用 `/login llama.cpp` 配置，用 `/
 | 剪贴板 | Ctrl+V 粘贴图片或文本（Windows 上为 Alt+V），或将图片拖拽到终端 |
 | Bash 命令 | `!command` 运行并把输出发送给 LLM，`!!command` 运行但不发送 |
 
-标准编辑快捷键如删除单词、撤销等，参见 [keybindings.md](./keybindings.md)。
+标准编辑快捷键如删除单词、撤销等，参见 [keybindings.md](./17.keybindings.md)。
 
 ### 命令
 
@@ -178,7 +179,7 @@ Pi 还支持 llama.cpp router 服务器。用 `/login llama.cpp` 配置，用 `/
 | 命令 | 描述 |
 |---------|-------------|
 | `/login`、`/logout` | 管理 provider 凭据 |
-| [`/llama`](./llama-cpp.md) | 下载、加载和卸载 llama.cpp router 模型 |
+| [`/llama`](./04.llama-cpp.md) | 下载、加载和卸载 llama.cpp router 模型 |
 | `/model` | 切换模型 |
 | `/scoped-models` | 启用/禁用 Ctrl+P 循环切换的模型 |
 | `/settings` | Thinking 级别、主题、消息投递、transport |
@@ -202,7 +203,7 @@ Pi 还支持 llama.cpp router 服务器。用 `/login llama.cpp` 配置，用 `/
 
 ### 键盘快捷键
 
-完整列表见 `/hotkeys`。通过 `~/.pi/agent/keybindings.json` 自定义。参见 [keybindings.md](./keybindings.md)。
+完整列表见 `/hotkeys`。通过 `~/.pi/agent/keybindings.json` 自定义。参见 [keybindings.md](./17.keybindings.md)。
 
 **常用：**
 
@@ -230,13 +231,13 @@ Pi 还支持 llama.cpp router 服务器。用 `/login llama.cpp` 配置，用 `/
 
 在 Windows Terminal 上，`Alt+Enter` 默认是全屏。请按 [terminal-setup.md](./terminal-setup.md) 重新映射，使 pi 能接收到 follow-up 快捷键。
 
-在 [settings](./settings.md) 中配置投递方式：`steeringMode` 和 `followUpMode` 可以是 `"one-at-a-time"`（默认，等待响应）或 `"all"`（一次投递所有排队消息）。`transport` 为支持多种 transport 的 provider 选择传输偏好（`"sse"`、`"websocket"` 或 `"auto"`）。
+在 [settings](./11.settings.md) 中配置投递方式：`steeringMode` 和 `followUpMode` 可以是 `"one-at-a-time"`（默认，等待响应）或 `"all"`（一次投递所有排队消息）。`transport` 为支持多种 transport 的 provider 选择传输偏好（`"sse"`、`"websocket"` 或 `"auto"`）。
 
 ---
 
 ## 会话
 
-会话以带树结构的 JSONL 文件存储。每个条目都有 `id` 和 `parentId`，支持就地分支而无需创建新文件。文件格式参见 [session-format.md](./session-format.md)。
+会话以带树结构的 JSONL 文件存储。每个条目都有 `id` 和 `parentId`，支持就地分支而无需创建新文件。文件格式参见 [session-format.md](./09.session-format.md)。
 
 ### 管理
 
@@ -278,7 +279,7 @@ pi --fork <path|id>    # 将指定的会话文件或 ID fork 为新会话
 
 **自动：** 默认启用。在上下文溢出时触发（恢复并重试），或接近上限时触发（主动）。通过 `/settings` 或 `settings.json` 配置。
 
-Compaction 是有损的。完整历史仍保留在 JSONL 文件中；用 `/tree` 可以回顾。可通过 [extensions](#extensions) 自定义 compaction 行为。内部机制参见 [compaction.md](./compaction.md)。
+Compaction 是有损的。完整历史仍保留在 JSONL 文件中；用 `/tree` 可以回顾。可通过 [extensions](#extensions) 自定义 compaction 行为。内部机制参见 [compaction.md](./10.compaction.md)。
 
 ---
 
@@ -291,7 +292,7 @@ Compaction 是有损的。完整历史仍保留在 JSONL 文件中；用 `/tree`
 | `~/.pi/agent/settings.json` | 全局（所有项目） |
 | `.pi/settings.json` | 项目（覆盖全局） |
 
-所有选项参见 [settings.md](./settings.md)。
+所有选项参见 [settings.md](./11.settings.md)。
 
 ### 项目信任
 
@@ -325,6 +326,8 @@ Pi 在启动时从以下位置加载 `AGENTS.md`（或 `CLAUDE.md`）：
 - 父目录（从 cwd 向上遍历）
 - 当前目录
 
+如果某个目录中存在 `AGENTS.override.md`，Pi 会加载它，而不加载该目录下的 `AGENTS.md` 或 `CLAUDE.md`。其它目录的上下文文件仍会被拼接进来。
+
 用于项目指令（`AGENTS.md`/`CLAUDE.md`）、约定、常用命令。所有匹配的文件会被拼接。
 
 使用 `--no-context-files`（或 `-nc`）禁用上下文文件加载。
@@ -347,7 +350,7 @@ Review this code for bugs, security issues, and performance problems.
 Focus on: {{focus}}
 ```
 
-放在 `~/.pi/agent/prompts/`、`.pi/prompts/` 或一个 [pi package](#pi-packages) 中即可分享给他人。参见 [prompt-templates.md](./prompt-templates.md)。
+放在 `~/.pi/agent/prompts/`、`.pi/prompts/` 或一个 [pi package](#pi-packages) 中即可分享给他人。参见 [prompt-templates.md](./15.prompt-templates.md)。
 
 ### Skills
 
@@ -363,7 +366,7 @@ Use this skill when the user asks about X.
 2. Then that
 ```
 
-放在 `~/.pi/agent/skills/`、`~/.agents/skills/`、`.pi/skills/` 或 `.agents/skills/`（从 `cwd` 向上到各父目录）或一个 [pi package](#pi-packages) 中即可分享给他人。参见 [skills.md](./skills.md)。
+放在 `~/.pi/agent/skills/`、`~/.agents/skills/`、`.pi/skills/` 或 `.agents/skills/`（从 `cwd` 向上到各父目录）或一个 [pi package](#pi-packages) 中即可分享给他人。参见 [skills.md](./14.skills.md)。
 
 ### Extensions
 
@@ -395,13 +398,13 @@ export default function (pi: ExtensionAPI) {
 - 等待时玩游戏（是的，能跑 Doom）
 - ……任何你能想到的东西
 
-放在 `~/.pi/agent/extensions/`、`.pi/extensions/` 或一个 [pi package](#pi-packages) 中即可分享给他人。参见 [extensions.md](./extensions.md) 和 [examples/extensions/](https://github.com/earendil-works/pi/tree/main/packages/coding-agent/examples/extensions/)。
+放在 `~/.pi/agent/extensions/`、`.pi/extensions/` 或一个 [pi package](#pi-packages) 中即可分享给他人。参见 [extensions.md](./19.extensions.md) 和 [examples/extensions/](https://github.com/earendil-works/pi/tree/main/packages/coding-agent/examples/extensions/)。
 
 ### Themes
 
 内置：`dark`、`light`。主题支持热重载：修改活动主题文件，pi 会立即应用更改。
 
-放在 `~/.pi/agent/themes/`、`.pi/themes/` 或一个 [pi package](#pi-packages) 中即可分享给他人。参见 [themes.md](./themes.md)。
+放在 `~/.pi/agent/themes/`、`.pi/themes/` 或一个 [pi package](#pi-packages) 中即可分享给他人。参见 [themes.md](./16.themes.md)。
 
 ### Pi Packages
 
@@ -452,7 +455,7 @@ Packages 安装到 `~/.pi/agent/git/`（git）或 `~/.pi/agent/npm/`（npm）。
 
 没有 `pi` manifest 时，pi 会从约定目录（`extensions/`、`skills/`、`prompts/`、`themes/`）自动发现。
 
-参见 [packages.md](./packages.md)。
+参见 [packages.md](./18.packages.md)。
 
 ---
 
@@ -541,7 +544,7 @@ pi config                    # 启用/禁用 package 资源
 |------|-------------|
 | （默认） | 交互模式 |
 | `-p`、`--print` | 打印响应后退出 |
-| `--mode json` | 将所有事件输出为 JSON lines（参见 [json.md](./json.md)） |
+| `--mode json` | 将所有事件输出为 JSON lines（参见 [json.md](./07.json.md)） |
 | `--mode rpc` | 用于进程集成的 RPC 模式（参见 [rpc.md](./rpc.md)） |
 | `--export <in> [out]` | 导出会话为 HTML |
 
@@ -607,6 +610,8 @@ cat README.md | pi -p "Summarize this text"
 |--------|-------------|
 | `--system-prompt <text>` | 替换默认 prompt（上下文文件和 skills 仍会追加） |
 | `--append-system-prompt <text>` | 追加到系统提示词 |
+| `--tui-mode <mode>` | TUI 模式：`regular`（默认）或实验性的 `fullscreen` |
+| `--use-theme <name[/name]>` | 为本次运行设置初始交互主题，不改动设置 |
 | `--verbose` | 强制显示详细启动信息 |
 | `-a`、`--approve` | 本次运行信任项目级文件 |
 | `-na`、`--no-approve` | 本次运行忽略项目级文件 |
@@ -664,6 +669,8 @@ pi --thinking high "Solve this complex problem"
 
 | 变量 | 描述 |
 |----------|-------------|
+| `AI_AGENT` | 由 CLI 和 RPC 入口设为 `pi`，便于通用工具把子进程归属到 Pi |
+| `PI_CODING_AGENT` | 由 CLI 和 RPC 入口设为 `true`，便于子进程检测自己运行在 Pi 内部 |
 | `PI_CODING_AGENT_DIR` | 覆盖配置目录（默认：`~/.pi/agent`） |
 | `PI_CODING_AGENT_SESSION_DIR` | 覆盖会话存储目录（会被 `--session-dir` 覆盖） |
 | `PI_PACKAGE_DIR` | 覆盖 package 目录（适用于 store 路径不便处理的 Nix/Guix） |
@@ -672,6 +679,18 @@ pi --thinking high "Solve this complex problem"
 | `PI_TELEMETRY` | 覆盖安装/更新遥测和 provider 归属 headers。用 `1`/`true`/`yes` 启用或 `0`/`false`/`no` 禁用。这不会禁用更新检查 |
 | `PI_CACHE_RETENTION` | 设为 `long` 启用扩展的 prompt cache（Anthropic：1 小时，OpenAI：24 小时） |
 | `VISUAL`、`EDITOR` | `externalEditor` 未设置时 Ctrl+G 的回退外部编辑器；Windows 上默认为 Notepad，其他平台为 `nano` |
+
+由 LLM 可调用的 bash 工具执行的命令还会收到当前 session 的元信息：
+
+| 变量 | 描述 |
+|----------|-------------|
+| `PI_SESSION_ID` | 当前 session ID |
+| `PI_SESSION_FILE` | session JSONL 的绝对路径；临时 session 不设置该变量 |
+| `PI_PROVIDER` | 当前选中的模型 provider |
+| `PI_MODEL` | 当前选中的模型 ID |
+| `PI_REASONING_LEVEL` | 当前实际生效的推理级别 |
+
+这些值在每条命令启动时解析。语义、示例以及自定义工具如何选择退出，参见[环境变量](environment-variables.md#bash-工具的-session-环境)。
 
 ---
 
