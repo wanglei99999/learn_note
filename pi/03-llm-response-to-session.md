@@ -6,7 +6,7 @@
 >
 > 两篇合起来是一个闭环：`磁盘 → 模型 → 磁盘`。02 篇的关键词是**塌缩**（丢信息、不可逆），本篇的关键词是**累积**（攒信息、可中断）。
 >
-> 所有 `文件:行号` 基于 commit `859bd29bd`。核心文件三个：`packages/ai/src/types.ts`（事件协议与消息类型）、`packages/ai/src/api/anthropic-messages.ts`（SSE 解析与状态机，以 Anthropic 为样本）、`packages/agent/src/agent-loop.ts`（循环与工具执行）。
+> 所有 `文件:行号` 已重定位到 **v0.84.2**（`5cd93f688`）。核心文件三个：`packages/ai/src/types.ts`（事件协议与消息类型）、`packages/ai/src/api/anthropic-messages.ts`（SSE 解析与状态机，以 Anthropic 为样本）、`packages/agent/src/agent-loop.ts`（循环与工具执行）。
 
 ## 目录
 
@@ -53,7 +53,7 @@ T1   ── SSE 流开始，事件逐个到达 ───────────
 T2   ── 连接结束，AssistantMessage 完整 ──────────────────────
      ⭳ message_end → appendMessage → .jsonl 多一行（assistant）
 
-T3   ── agent-loop 醒过来（agent-loop.ts:217）────────────────
+T3   ── agent-loop 醒过来（agent-loop.ts:203）────────────────
         filter 出 2 个 toolCall
         executeToolCalls(…)          ← 这里才真正干活
           ├─ read("A.md")   ┐ 默认并行（:456）
@@ -82,7 +82,7 @@ T6   ── 循环继续…… 直到某次 done 的 reason 是 "stop"，agent_e
 **① 工具不是流到一半就执行的。**
 
 ```typescript
-// agent-loop.ts:217
+// agent-loop.ts:203
 const toolCalls = message.content.filter((c) => c.type === "toolCall");
 ```
 
@@ -95,7 +95,7 @@ const toolCalls = message.content.filter((c) => c.type === "toolCall");
 **② `length` 截断时，所有工具调用一律不执行。**
 
 ```typescript
-// agent-loop.ts:227-230
+// agent-loop.ts:211-214
 const executedToolBatch =
 	message.stopReason === "length"
 		? await failToolCallsFromTruncatedMessage(toolCalls, emit)   // 全部判失败
@@ -122,9 +122,9 @@ const executedToolBatch =
 | --- | --- |
 | 上下文会涨、需要压缩（01 篇） | 每轮重发全部历史，messages 数组只增不减 |
 | 02 篇那六个纯函数**每轮都跑一遍** | T0 和 T5 各是一次完整的"树 → 报文"组装，所以复杂度必须是 O(路径深度) 而非 O(全部条目) |
-| 提示词缓存为什么值钱 | 第 N 轮请求的前 90% 与第 N−1 轮**逐字节相同**，`cache_control` 挂在系统提示词上（`anthropic-messages.ts:1041`）就是为了让这部分按 0.1 倍计费 |
+| 提示词缓存为什么值钱 | 第 N 轮请求的前 90% 与第 N−1 轮**逐字节相同**，`cache_control` 挂在系统提示词上（`anthropic-messages.ts:1031`）就是为了让这部分按 0.1 倍计费 |
 | 模型为什么"记不住" | 它是**无状态**的——不是记得你说过什么，而是每轮被重新告知一遍。想让它记住某件事，唯一办法是让那件事出现在 messages 数组里 |
-| 按 Esc 中断为什么还能留下内容 | `error` 事件同样携带 `AssistantMessage`（`types.ts:584`），已攒进 `content` 的部分不丢 |
+| 按 Esc 中断为什么还能留下内容 | `error` 事件同样携带 `AssistantMessage`（`types.ts:551`），已攒进 `content` 的部分不丢 |
 | 界面上"一次回答"，账单上好几次调用 | 一次 `agent_start` 到 `agent_end` 之间，可能有十几个 T0→T6 循环 |
 
 **判断：这条时间线是整个 agent 的心跳。** 单看任何一个模块都能读懂代码，但"为什么这样设计"的答案几乎都在这条轴上。
@@ -543,7 +543,7 @@ partialJson = '{"path":"A.md"}'     →  arguments = { path: "A.md" }
 
 ### 3.7 `redacted_thinking`：看不见但不能扔
 
-开了扩展思考后模型的推理过程会流回来，但偶尔安全系统会判定某段推理不宜明文返回，发回来的就是一坨加密数据。`types.ts:403-407` 的注释说全了：
+开了扩展思考后模型的推理过程会流回来，但偶尔安全系统会判定某段推理不宜明文返回，发回来的就是一坨加密数据。`types.ts:360-363` 的注释说全了：
 
 > 为 true 时表示思考内容被安全过滤器遮蔽；不透明的加密载荷保存在 `thinkingSignature` 中，**以便后续轮次原样回传给 API，维持多轮连续性**。
 
@@ -612,17 +612,17 @@ stream.end();
         ↓
       AssistantMessageEventStream
         ↓
-      agent-loop.ts:343   for await (const event of response) { … }
+      agent-loop.ts:317   for await (const event of response) { … }
         ↓
       streamAssistantResponse 返回这条 AssistantMessage
         ↓
-      agent-loop.ts:206   const message = await streamAssistantResponse(…)
+      agent-loop.ts:193   const message = await streamAssistantResponse(…)
 ```
 
 到这里它换了个名字叫 `message`，随即分三路：
 
 ```text
-output 诞生（空壳）        anthropic-messages.ts:522
+output 诞生（空壳）        anthropic-messages.ts:509
    ↓ 边收边攒（几十上百圈）
 output 完整               :779 循环结束
    ↓ done 事件带出去 → agent-loop 收到，变成 message
@@ -641,7 +641,7 @@ output 完整               :779 循环结束
 
 模型回话不是一次性到达的，是一个字一个字流过来的。**事件协议就是把这个连续过程切成离散事件的规则**：会发出哪些事件、按什么顺序、每个带什么数据。
 
-`packages/ai/src/types.ts:572`：
+`packages/ai/src/types.ts:535`：
 
 ```typescript
 export type AssistantMessageEvent =
@@ -702,7 +702,7 @@ TUI 收到任何一个事件，直接拿 `partial` 重画即可。
 
 ### 4.2 `contentIndex`：`content` 数组的下标
 
-一条 assistant 消息的 `content` 是数组（`types.ts:463`）：
+一条 assistant 消息的 `content` 是数组（`types.ts:429`）：
 
 ```typescript
 content: (TextContent | ThinkingContent | ToolCall)[];
@@ -738,7 +738,7 @@ toolcall_delta  contentIndex 4   delta '{"path"'
 一个自然的疑问：工具调用不就是模型输出的一段文本吗，为什么要单列一种类型？看结构就明白了。
 
 ```typescript
-// types.ts:417
+// types.ts:372
 export interface ToolCall {
 	type: "toolCall";
 	id: string;                       // ← 身份证
@@ -746,7 +746,7 @@ export interface ToolCall {
 	arguments: Record<string, any>;   // ← 已解析好的对象
 }
 
-// types.ts:391
+// types.ts:350
 export interface TextContent {
 	type: "text";
 	text: string;                     // ← 就一坨字符串
@@ -771,28 +771,28 @@ toolResult:  { toolCallId: "c1", … }      顺序可以是乱的
 toolResult:  { toolCallId: "c3", … }
 ```
 
-到 Anthropic 报文里就是 `tool_use_id` ↔ `tool_use.id` 配对（`anthropic-messages.ts:1155` 的 `convertToolResult`）。**纯文本没地方挂这个 id**——要么自己发明一套编号约定，要么只能串行调用，三个文件三个来回，慢三倍。
+到 Anthropic 报文里就是 `tool_use_id` ↔ `tool_use.id` 配对（`anthropic-messages.ts:1143` 的 `convertToolResult`）。**纯文本没地方挂这个 id**——要么自己发明一套编号约定，要么只能串行调用，三个文件三个来回，慢三倍。
 
-`ThinkingContent` 同理（`types.ts:398`），它带着 `thinkingSignature`（provider 返回的不透明推理标识，下一轮要原样回传才能维持推理连续性）和 `redacted`（是否被安全过滤器遮蔽）。**混进 `text` 里这些字段就没地方放了。**
+`ThinkingContent` 同理（`types.ts:356`），它带着 `thinkingSignature`（provider 返回的不透明推理标识，下一轮要原样回传才能维持推理连续性）和 `redacted`（是否被安全过滤器遮蔽）。**混进 `text` 里这些字段就没地方放了。**
 
 **结论：分成三种类型，是因为它们各自带着不同的结构化元数据，而这些元数据都有硬用途（配对、回传、执行）。挤进一个 `text: string` 就全丢了。**
 
 ### 4.4 `done` / `error`：用类型收窄堵死非法组合
 
 ```typescript
-| { type: "done";  reason: Extract<StopReason, "stop" | "length" | "toolUse">; message: AssistantMessage }
-| { type: "error"; reason: Extract<StopReason, "aborted" | "error">;           error: AssistantMessage };
+| { type: "done";  reason: Extract<StopReason, "stop" | "length" | "toolUse" | "deferred">; message: AssistantMessage }
+| { type: "error"; reason: Extract<StopReason, "aborted" | "error">;                        error: AssistantMessage };
 ```
 
-`StopReason` 全集有 6 个（`types.ts:453`）：
+`StopReason` 全集有 7 个（`types.ts:405`）：
 
 ```typescript
-export type StopReason = "pending" | "stop" | "length" | "toolUse" | "error" | "aborted";
+export type StopReason = "pending" | "stop" | "length" | "toolUse" | "error" | "aborted" | "deferred";
 ```
 
 `Extract<T, U>` 是 TypeScript 内置工具类型，**从联合类型 T 里只挑出属于 U 的成员**。于是：
 
-- `done` 的 reason **只可能**是 `stop` / `length` / `toolUse`；
+- `done` 的 reason **只可能**是 `stop` / `length` / `toolUse` / `deferred`；
 - `error` 的 reason **只可能**是 `aborted` / `error`；
 - `pending` 一个都不在里面——它是"还没结束"的中间态，不可能出现在终结事件上。
 
@@ -806,9 +806,12 @@ export type StopReason = "pending" | "stop" | "length" | "toolUse" | "error" | "
 | `stop` | 模型说完了 | 停，控制权交回用户 |
 | `length` | 撞到 `max_tokens` 上限 | 停；且本轮所有工具调用一律判失败（1.1 ②） |
 | `aborted` | 用户中断 | 停，保留已收到的部分 |
-| `error` | 出错 | 停（`agent-loop.ts:209` 直接 `turn_end` + `agent_end` 返回） |
+| `error` | 出错 | 停（`agent-loop.ts:196` 直接 `turn_end` + `agent_end` 返回） |
+| `deferred` | 转入 provider 侧后台执行 | 停；消息落盘但**不进上下文**（`session/context.ts:72` 直接跳过） |
 
-**`toolUse` 就是那个"再来一轮"的信号**，`agent-loop.ts:180` 那个 `while (true)` 转不转，全看它。所以一次完整的用户交互可能是：
+> **修订（2026-08-23，v0.84.2）**：`StopReason` 从 6 个变成 7 个，新增 `deferred`——模型把活儿转给 provider 侧后台任务（配套的句柄类型是 `types.ts:409` 的 `DeferredHandle`）。它算**成功终态**，所以进的是 `done` 分支而不是 `error`。它带来一条本篇原来没有的规则：这条 assistant 消息会落盘，但投影成上下文时被整条跳过（`session/context.ts:72`），因为活儿还没干完，把它喂回模型只会造成误导。harness 侧为此单开了 `SessionStopReason = Exclude<StopReason, "pending"> | "deferred"`（`session/types.ts:8`）——**会话里存得下的停止原因，和流事件里出现的停止原因，不是同一个集合。**
+
+**`toolUse` 就是那个"再来一轮"的信号**，`agent-loop.ts:170` 那个 `while (true)` 转不转，全看它。所以一次完整的用户交互可能是：
 
 ```text
 用户提问
@@ -827,7 +830,7 @@ export type StopReason = "pending" | "stop" | "length" | "toolUse" | "error" | "
 ### 5.1 先决定串行还是并行
 
 ```typescript
-// agent-loop.ts:449-456
+// agent-loop.ts:418-425
 const toolCalls = assistantMessage.content.filter((c) => c.type === "toolCall");
 const hasSequentialToolCall = toolCalls.some(
 	(tc) => currentContext.tools?.find((t) => t.name === tc.name)?.executionMode === "sequential",
@@ -925,7 +928,7 @@ runAgentLoop(…)                                      agent-loop.ts
             │    │
             │    ├─ transformContext / convertToLlm   ← 02 篇第 9 章
             │    ├─ 组装 Context，发 HTTP             ← T0
-            │    └─ stream(…)                         ← anthropic-messages.ts:514
+            │    └─ stream(…)                         ← anthropic-messages.ts:501
             │         │
             │         └─ for await (const event of iterateAnthropicEvents(…)) {
             │              …                          ← 第 2、3 章讲的就是这个循环
@@ -1029,7 +1032,7 @@ if (pendingMessages.length > 0) {
 - **有 steering message** —— 每轮结束抓一次（`:276`），指"agent 干活期间说的话"
 - **有 follow-up message** —— 内层已退出，外层再捞一次（`:281`），指"agent 都准备收摊了才说的话"
 
-后两者的区别只是**时机**。coding-agent 侧两个方法在 `agent-session.ts:1725` / `:1731`。
+后两者的区别只是**时机**。coding-agent 侧两个方法在 `agent-session.ts:1545` / `:1731`。
 
 ### 6.4 三个出口
 
@@ -1060,7 +1063,7 @@ if (nextTurnSnapshot) {
 }
 ```
 
-**`currentContext` 整个可以被替换。** 时间线上它落在 **T4 和 T5 之间**：工具结果已进上下文，下一个请求还没发出去。coding-agent 在 `agent-session.ts:584`（`_installAgentNextTurnRefresh`）接管了这个钩子。
+**`currentContext` 整个可以被替换。** 时间线上它落在 **T4 和 T5 之间**：工具结果已进上下文，下一个请求还没发出去。coding-agent 在 `agent-session.ts:546`（`_installAgentNextTurnRefresh`）接管了这个钩子。
 
 ⚠️ **更正（2026-08-19）**：本节原先写「这就是压缩的插入点……自动压缩就是从这里触发的」，**这是错的**。核对后：
 
@@ -1068,11 +1071,13 @@ if (nextTurnSnapshot) {
 // coding-agent 挂的那个（_installAgentNextTurnRefresh :584）只刷四样
 context: { ...previousContext, systemPrompt: …, tools: … },
 model: …, thinkingLevel: …,
-// harness 的那个（agent-harness.ts:541）是刷盘 + 重建状态
+// harness 那边挂的是刷盘 + 重建状态（v0.83 时在 agent-harness.ts:541）
 // 两处都没有任何压缩逻辑
 ```
 
-**自动压缩不在 agent 循环内，而在循环【之外】的会话层**——`_handlePostAgentRun` → `_checkCompaction` → `_runAutoCompaction`（`agent-session.ts:1220`）。本篇 7.3 节写的「留到 `agent_end` 时判断」才是对的。
+> **补注（2026-08-23，v0.84.2）**：上游重写了 harness，`agent-harness.ts` 里那个 `prepareNextTurn` 实现已不存在，刷盘与状态重建改由 reducer 承担（`harness/reducer.ts`）。钩子本身没变——它仍是 `AgentLoopConfig` 的回调（声明在 `agent.ts:109`，调用点 `agent-loop.ts:232`），coding-agent 那侧的实现也还在原处。**本节的论断不受影响：两侧实现都没有压缩逻辑，压缩仍在循环之外。**
+
+**自动压缩不在 agent 循环内，而在循环【之外】的会话层**——`_handlePostAgentRun` → `_checkCompaction` → `_runAutoCompaction`（`agent-session.ts:1109`）。本篇 7.3 节写的「留到 `agent_end` 时判断」才是对的。
 
 放在循环外有三个理由：
 
@@ -1106,7 +1111,7 @@ currentContext.messages.push(result);      // :235
 ### 7.1 落盘的触发点是 `message_end`
 
 ```typescript
-// agent-session.ts:694
+// agent-session.ts:651
 if (event.type === "message_end") {
 	if (event.message.role === "custom") {
 		this.sessionManager.appendCustomMessageEntry(customType, content, display, details);
@@ -1145,7 +1150,7 @@ T4  toolResult 生成    → message_end → appendMessage → .jsonl 多一行
 // 其他消息类型（bashExecution、compactionSummary、branchSummary）由别处负责持久化
 ```
 
-它们不走 agent 循环，因为**不是模型产出的**：`bashExecution` 来自 `!` 命令本地执行（`agent-session.ts:3126` / `:3168`）、`compactionSummary` 来自压缩流程（`appendCompaction`，01 篇）、`branchSummary` 来自分支流程。**`message_end` 只管"agent 循环里流过的消息"。**
+它们不走 agent 循环，因为**不是模型产出的**：`bashExecution` 来自 `!` 命令本地执行（`agent-session.ts:2960` / `:3168`）、`compactionSummary` 来自压缩流程（`appendCompaction`，01 篇）、`branchSummary` 来自分支流程。**`message_end` 只管"agent 循环里流过的消息"。**
 
 ### 7.3 自动压缩在这里埋线
 

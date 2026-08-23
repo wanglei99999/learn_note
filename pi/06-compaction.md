@@ -14,7 +14,7 @@
 >
 > **本篇的主路径是「一次压缩的生命」**：上下文快满 → 判定 → 编排 → 生成摘要 → 落盘 → 新上下文生效。第 1 章先解决"它到底在哪儿发生"——这是理解其余一切的前提。
 >
-> 所有 `文件:行号` 基于 commit `859bd29bd`。核心文件三个：`core/agent-session.ts`（触发与编排）、`core/compaction/compaction.ts`（切点与生成）、`core/compaction/utils.ts`（文件操作与序列化）。
+> 所有 `文件:行号` 已重定位到 **v0.84.2**（`5cd93f688`）。核心文件三个：`core/agent-session.ts`（触发与编排）、`core/compaction/compaction.ts`（切点与生成）、`core/compaction/utils.ts`（文件操作与序列化）。
 >
 > ⬜ **本篇尚未覆盖**：`prepareBranchEntries` 的 `tokenBudget` 裁剪策略（见 7.2 末尾）。
 
@@ -65,7 +65,7 @@ anthropic-messages.ts    组请求体、发 HTTP、收 SSE
 ### 1.2 关键定位：压缩在 agent 循环【之外】
 
 ```typescript
-// agent-session.ts:1185
+// agent-session.ts:1074
 private async _runAgentPrompt(messages): Promise<void> {
 	this._isAgentRunActive = true;
 	try {
@@ -82,14 +82,14 @@ private async _runAgentPrompt(messages): Promise<void> {
 
 **压缩发生在 `agent-loop.ts` 已经全部跑完、控制权交回 `agent-session.ts` 之后。不是在循环里面。**
 
-> ⚠️ 03 篇 6.5 原先写「自动压缩挂在 `prepareNextTurn` 上、落在 T4–T5 之间」，**那是错的**，已于 2026-08-19 更正。`prepareNextTurn`（`agent-session.ts:584`）只刷 `systemPrompt` / `tools` / `model` / `thinkingLevel`（05 篇 6.1）。
+> ⚠️ 03 篇 6.5 原先写「自动压缩挂在 `prepareNextTurn` 上、落在 T4–T5 之间」，**那是错的**，已于 2026-08-19 更正。`prepareNextTurn`（`agent-session.ts:546`）只刷 `systemPrompt` / `tools` / `model` / `thinkingLevel`（05 篇 6.1）。
 
 ### 1.3 为什么必须在外面：快照语义
 
 这不是设计偏好，是**数学上的必然**。看 `agent.ts` 把消息交给循环之前做了什么：
 
 ```typescript
-// agent.ts:453-459
+// agent.ts:437-442
 private createContextSnapshot(): AgentContext {
 	return {
 		systemPrompt: this._state.systemPrompt,
@@ -100,7 +100,7 @@ private createContextSnapshot(): AgentContext {
 ```
 
 ```typescript
-// agent-loop.ts:110-113
+// agent-loop.ts:103-106
 const currentContext: AgentContext = {
 	...context,
 	messages: [...context.messages, ...prompts],     // ★ 再拷一次
@@ -148,7 +148,7 @@ agent-loop.ts      currentContext.messages          局部变量、run 结束就
 
 ## 第 2 章 触发段：什么时候压
 
-入口函数 `_checkCompaction`（`agent-session.ts:2201`）。
+入口函数 `_checkCompaction`（`agent-session.ts:2050`）。
 
 ### 2.1 两个调用点
 
@@ -256,7 +256,7 @@ if (sameModel && isContextOverflow(assistantMessage, contextWindow)) {
 **不会——溢出本身就会终止循环：**
 
 ```typescript
-// agent-loop.ts:209-213
+// agent-loop.ts:196-200
 if (message.stopReason === "error" || message.stopReason === "aborted") {
 	await emit({ type: "turn_end", message, toolResults: [] });
 	await emit({ type: "agent_end", messages: newMessages });
@@ -274,7 +274,7 @@ if (message.stopReason === "error" || message.stopReason === "aborted") {
 
 **"溢出把控制权交还给会话层"这件事，是循环自己做的。** 压缩不需要在循环内蹲守，只要守住出口——而溢出必然走那个出口。
 
-#### 2.3.2 `isContextOverflow` 认三种信号（`ai/src/utils/overflow.ts:141`）
+#### 2.3.2 `isContextOverflow` 认三种信号（`ai/src/utils/overflow.ts:134`）
 
 ```typescript
 // 情形一：明确的错误文本
@@ -309,7 +309,7 @@ if (!willRetry) return await this._runAutoCompaction("overflow", false);
 
 ### 2.4 Case 2 阈值：事前预防
 
-判定公式本身只有一行（`compaction.ts:246`）：
+判定公式本身只有一行（`compaction.ts:235`）：
 
 ```typescript
 export function shouldCompact(contextTokens, contextWindow, settings): boolean {
@@ -409,7 +409,7 @@ if (compactionEntry && usageMsg.role === "assistant"
 
 ## 第 3 章 编排段：`_runAutoCompaction` 七步
 
-`agent-session.ts:2318`。骨架：
+`agent-session.ts:2166`。骨架：
 
 ```text
 ① 取密钥               _getSummarizationRequestAuth(this.model)
@@ -445,7 +445,7 @@ const preparation = prepareCompaction(pathEntries, settings);
 if (!preparation) return false;
 ```
 
-01 篇学的 `findCutPoint`、`boundaryStart` 接力、`isSplitTurn`、`firstKeptEntryIndex`，全在 `prepareCompaction`（`compaction.ts:738`）里面。
+01 篇学的 `findCutPoint`、`boundaryStart` 接力、`isSplitTurn`、`firstKeptEntryIndex`，全在 `prepareCompaction`（`compaction.ts:736`）里面。
 
 返回 `null` 表示"压不动"（例如保留区之外已无内容），**直接放弃，不报错**。
 
@@ -525,7 +525,7 @@ if (this._autoCompactionAbortController.signal.aborted) {
 
 本章分两半：4.1–4.5 讲 `compact()` 这个**调度器**（发几次请求、覆盖哪些消息）；4.6–4.11 讲 `generateSummaryWithUsage` 这个**执行者**（摘要长什么样、请求怎么造）。
 
-`compact()`（`compaction.ts:849`）本身几乎没有逻辑，只决定**发几次请求、怎么拼结果**。
+`compact()`（`compaction.ts:844`）本身几乎没有逻辑，只决定**发几次请求、怎么拼结果**。
 
 ```text
 preparation 解构出 8 个字段
@@ -579,7 +579,7 @@ const result = await generateSummaryWithUsage(
 
 **一轮 = 从一条 `user` 开始，到模型不再调工具为止。**
 
-切点不能随便选（`compaction.ts:320`）：
+切点不能随便选（`compaction.ts:308`）：
 
 ```typescript
 function isCutPointMessage(message: AgentMessage): boolean {
@@ -654,7 +654,7 @@ if (isSplitTurn && turnPrefixMessages.length > 0) {
 
 一个自然的疑问：大摘要是不是也覆盖了轮前缀那段，只是轮前缀更详细？
 
-**不是。两段首尾相接、互不重叠。** 关键在这一行（`compaction.ts:777`）：
+**不是。两段首尾相接、互不重叠。** 关键在这一行（`compaction.ts:773`）：
 
 ```typescript
 const historyEnd = cutPoint.isSplitTurn ? cutPoint.turnStartIndex : cutPoint.firstKeptEntryIndex;
@@ -703,9 +703,9 @@ if (!firstKeptEntryId) {
 
 ### 4.6 摘要长什么样：一个七段模板
 
-前面几节讲的都是"发几次请求、覆盖哪些消息"。但要看懂 `generateSummaryWithUsage`（`compaction.ts:642`）里那些参数为什么长那样，得先看**产物**——**摘要不是"随便总结一下"，而是往一个固定模板里填**。
+前面几节讲的都是"发几次请求、覆盖哪些消息"。但要看懂 `generateSummaryWithUsage`（`compaction.ts:643`）里那些参数为什么长那样，得先看**产物**——**摘要不是"随便总结一下"，而是往一个固定模板里填**。
 
-`SUMMARIZATION_PROMPT`（`compaction.ts:486`）要求 `Use this EXACT format`：
+`SUMMARIZATION_PROMPT`（`compaction.ts:467`）要求 `Use this EXACT format`：
 
 ```markdown
 ## Goal
@@ -763,7 +763,7 @@ const maxTokens = Math.min(
 对比之下，轮前缀摘要（4.3）用的是**第三套提示词**：
 
 ```typescript
-// compaction.ts:826
+// compaction.ts:821
 const TURN_PREFIX_SUMMARIZATION_PROMPT = `This is the PREFIX of a turn that was too large to keep. The SUFFIX (recent work) is retained. …`;
 ```
 
@@ -825,7 +825,7 @@ const llmMessages = convertToLlm(currentMessages);            // 先归一化（
 const conversationText = serializeConversation(llmMessages);  // 再拍平成文本
 ```
 
-但 `serializeConversation`（`utils.ts:125`）同时解决了两个**互不相干**的问题。
+但 `serializeConversation`（`utils.ts:109`）同时解决了两个**互不相干**的问题。
 
 #### 问题一：防止模型接着聊
 
@@ -854,7 +854,7 @@ const conversationText = serializeConversation(llmMessages);  // 再拍平成文
 ③ SUMMARIZATION_SYSTEM_PROMPT  Do NOT continue…        ← 指令上明令禁止
 ```
 
-系统提示词（`utils.ts:174`）三句话堵同一个洞：
+系统提示词（`utils.ts:156`）三句话堵同一个洞：
 
 ```typescript
 export const SUMMARIZATION_SYSTEM_PROMPT = `You are a context summarization assistant. …
@@ -934,7 +934,7 @@ if (toolCalls.length > 0) parts.push(`[Assistant tool calls]: ${toolCalls.join("
 ### 4.9 发请求：三个刻意的选择
 
 ```typescript
-// compaction.ts:581
+// compaction.ts:565
 export async function completeSummarization(model, context, options, streamFn, retry, callbacks) {
 	// Summaries are standalone requests, so isolate routing and avoid cache writes that cannot be reused.
 	const requestOptions: SimpleStreamOptions = { ...options, cacheRetention: "none", sessionId: uuidv7() };
@@ -1017,7 +1017,7 @@ The conversation history before this point was compacted into the following summ
 
 所以 pi 把它**单独抽出来，不经过 LLM 摘要**。
 
-### 5.1 提取：只认三个工具的 `path`（`utils.ts:32`）
+### 5.1 提取：只认三个工具的 `path`（`utils.ts:29`）
 
 ```typescript
 export function extractFileOpsFromMessage(message, fileOps): void {
@@ -1058,7 +1058,7 @@ fileOps = {
 }
 ```
 
-### 5.2 合并：读过又改过的，只算改过（`utils.ts:67`）
+### 5.2 合并：读过又改过的，只算改过（`utils.ts:62`）
 
 ```typescript
 export function computeFileLists(fileOps) {
@@ -1075,7 +1075,7 @@ readFiles     = ["src/config.ts"]        // db.ts 被剔除：它被改过
 
 函数注释写着 `files only read, not modified`。**对模型有用的是"我动过手的文件"**；`db.ts` 既读又改，列进"只读过"会误导。
 
-### 5.3 输出：XML 两段（`utils.ts:78`）
+### 5.3 输出：XML 两段（`utils.ts:72`）
 
 ```typescript
 if (readFiles.length > 0)     sections.push(`<read-files>\n${readFiles.join("\n")}\n</read-files>`);
@@ -1127,7 +1127,7 @@ details: { readFiles, modifiedFiles } as CompactionDetails,     // 形态二：�
 **为什么必须存 details**：下次压缩时这批消息已被摘要替换掉，只存文本的话得重新解析自然语言；存结构化数组，下次直接续上。
 
 ```typescript
-// compaction.ts:55-68
+// compaction.ts:50-62
 if (prevCompactionIndex >= 0) {
 	const prevCompaction = entries[prevCompactionIndex] as CompactionEntry;
 	if (!prevCompaction.fromHook && prevCompaction.details) {
@@ -1174,7 +1174,7 @@ if (cutPoint.isSplitTurn) {
 
 ## 第 6 章 生效段：压完怎么让新上下文起作用
 
-`agent-session.ts:2426-2429`，三行：
+`agent-session.ts:2274-2277`，三行：
 
 ```typescript
 this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage);
@@ -1242,7 +1242,7 @@ if (this._extensionRunner && savedCompactionEntry) {
 
 ### 7.1 手动 `/compact`：同一机制，两种交互契约
 
-`agent-session.ts:2018` 的 `compact(customInstructions?)`。把它和 `_runAutoCompaction()` 并排，**中间一大段几乎逐行相同**：
+`agent-session.ts:1864` 的 `compact(customInstructions?)`。把它和 `_runAutoCompaction()` 并排，**中间一大段几乎逐行相同**：
 
 ```text
 取密钥   _getSummarizationRequestAuth          ← 一样
@@ -1430,7 +1430,7 @@ targetPath = [A, B, F, G]        ← 从根排列
 
 > 遇到压缩边界时**不会停止**，因为这些边界也会被纳入，其摘要将成为上下文的一部分。
 
-对比压缩自己的处理（`compaction.ts:87`）：
+对比压缩自己的处理（`compaction.ts:80`）：
 
 ```typescript
 function getMessageFromEntryForCompaction(entry: SessionEntry): AgentMessage | undefined {
@@ -1439,7 +1439,7 @@ function getMessageFromEntryForCompaction(entry: SessionEntry): AgentMessage | u
 }
 ```
 
-而分支摘要的版本（`branch-summarization.ts:187`，注释写着 `but also handles compaction entries`）会把它转成 `compactionSummary` 消息一并摘要。
+而分支摘要的版本（`branch-summarization.ts:156`，注释写着 `but also handles compaction entries`）会把它转成 `compactionSummary` 消息一并摘要。
 
 | | 压缩 | 分支摘要 |
 |---|---|---|
@@ -1490,7 +1490,7 @@ import { computeFileLists, createFileOps, extractFileOpsFromMessage,
 #### 第四套提示词
 
 ```typescript
-// branch-summarization.ts:306
+// branch-summarization.ts:258
 const BRANCH_SUMMARY_PROMPT = `Create a structured summary of this conversation branch for context when returning later. …`;
 ```
 

@@ -2,7 +2,9 @@
 
 > 学习系列第 1 篇（全景见 `generated/全景地图`，agent 运行时见 `generated/agent`）。本篇沿着一次真实的动手实验，完整走通 pi 的会话持久化链路：**磁盘上的 JSONL 文件 → 内存投影 → 会话树 → 当前路径 → 发给 LLM 的上下文**，覆盖分支、标签、压缩（compaction）、`!` 命令注入等全部会话机制。
 >
-> 所有 `文件:行号` 基于 commit `c728df8dc`（v0.83.0），核心文件是 `packages/coding-agent/src/core/session-manager.ts`（约 1850 行）。注意它与 `generated/agent` 讲的 `packages/agent/src/harness/session/` 是两套平行实现——本篇讲的是 `pi` CLI 实际使用的这套。
+> 所有 `文件:行号` 已重定位到 **v0.84.2**（`5cd93f688`），核心文件是 `packages/coding-agent/src/core/session-manager.ts`（约 1530 行）。注意它与 `generated/agent` 讲的 `packages/agent/src/harness/session/` 是两套平行实现——本篇讲的是 `pi` CLI 实际使用的这套。
+>
+> **平行实现那一侧已经大改（2026-08-23 补注）**：`harness/session/` 从 8 个文件涨到 15 个，拆出了 `state.ts`（内存状态机）、`context.ts`（投影）、`jsonl/`（编解码与存储）等分层，另外整个 SQLite 后端被抽成独立包 `packages/session-backends`（37 个文件）。**本篇讲的这套没跟着变**（`session-manager.ts` 在 v0.83→v0.84.2 之间只动了 7 行），所以正文依然成立；但凡是拿两套做对照的地方（第 3 章父链遍历、02 篇 3.1 / 4.3），对照的另一侧都要按新结构重读。
 
 ## 目录
 
@@ -55,7 +57,7 @@ pi 的会话机制可以压缩成一句话：**磁盘上是只追加的事件日
 
 ### 2.1 唯一的结构规则
 
-除首行外，**每个条目都有 `id`（8 位十六进制短 ID）和 `parentId`**。整棵树就靠这两个字段。id 由 `generateId()`（`session-manager.ts:251`）生成：`randomUUID()` 截前 8 位，与 `byId` 碰撞检查，撞了重试最多 100 次后回退完整 UUID。
+除首行外，**每个条目都有 `id`（8 位十六进制短 ID）和 `parentId`**。整棵树就靠这两个字段。id 由 `generateId()`（`session-manager.ts:221`）生成：`randomUUID()` 截前 8 位，与 `byId` 碰撞检查，撞了重试最多 100 次后回退完整 UUID。
 
 ### 2.2 条目类型一览
 
@@ -133,7 +135,7 @@ user a → assistant b（内含 c/d/e/f 四个 toolCall 块）
 
 ## 第 3 章 加载：流式解析器的四个讲究
 
-入口 `loadEntriesFromFile()`（`session-manager.ts:564`）。不是 `readFileSync().split("\n")`，而是 `openSync` + 1 MiB 复用缓冲区（`:540`）循环 `readSync`，有四个值得学的细节：
+入口 `loadEntriesFromFile()`（`session-manager.ts:514`）。不是 `readFileSync().split("\n")`，而是 `openSync` + 1 MiB 复用缓冲区（`:540`）循环 `readSync`，有四个值得学的细节：
 
 1. **`StringDecoder` 处理多字节边界（`:571`）**。UTF-8 中文占 3 字节，缓冲区边界可能切在字符中间；StringDecoder 把残缺字节留到下一块拼接。没有它，长会话中文消息会随机乱码。
 2. **`pending` 尾行接力（`:573-588`）**。每块末尾不完整的半行 JSON 存入 `pending`，与下一块开头拼接；文件最后一行没有换行符也能通过 `decoder.end()` 收尾（`:591-593`）。
@@ -147,7 +149,7 @@ user a → assistant b（内含 c/d/e/f 四个 toolCall 块）
 | 命令 | 调用链 | 读多少 | 为什么 |
 | --- | --- | --- | --- |
 | `pi -c` 恢复最近 | `continueRecent` → `findMostRecentSession`（`:686`）→ `readSessionHeader`（`:622`） | **只读第一行** | 只需 header 的 `cwd`（过滤当前项目）+ 文件 mtime（排最新），不关心名字与内容 |
-| `pi -r` 列表选择 | `selectSession`（`main.ts:385`）→ `SessionManager.list` → `buildSessionInfo`（`:738`） | **流式读全文** | 选择器要显示会话名（在文件**末尾**的 session_info，见 4.5）、首条消息预览、消息数，还要支持全文搜索（`allMessagesText`） |
+| `pi -r` 列表选择 | `selectSession`（`main.ts:410`）→ `SessionManager.list` → `buildSessionInfo`（`:738`） | **流式读全文** | 选择器要显示会话名（在文件**末尾**的 session_info，见 4.5）、首条消息预览、消息数，还要支持全文搜索（`allMessagesText`） |
 
 `readSessionHeader` 用 4 KiB 缓冲区（`:541`）扫到第一条可解析行即返回，封顶扫 1 MiB（`:543`），超限抛 `SessionHeaderScanLimitError`；两条路径都是 best-effort（`:666-674`、`:814-816`），单个损坏文件返回 null，不影响其他会话被列出。`-r` 的全文解析以 10 路并发摊平（`MAX_CONCURRENT_SESSION_INFO_LOADS`，`:821`）。
 
@@ -255,7 +257,7 @@ leafId       "k12"                        文件物理最后一条
 
 ### 4.5 重命名 = session_info：与 label 同款的事件溯源，不同款的索引策略
 
-重命名会话不改 header、不改文件名——`appendSessionInfo(name)`（`:1211`）往**末尾**追加一条 `type: "session_info"`（name 先清洗换行，`:1212`）。入口：交互模式 `/name` 命令（`interactive-mode.ts:2793`，不带参数则显示当前名）、CLI `--name` 标志（`main.ts:672`）、`-r` 选择器内改名（`interactive-mode.ts:4948`）、扩展 API `ctx.setSessionName`。
+重命名会话不改 header、不改文件名——`appendSessionInfo(name)`（`:1211`）往**末尾**追加一条 `type: "session_info"`（name 先清洗换行，`:1212`）。入口：交互模式 `/name` 命令（`interactive-mode.ts:3001`，不带参数则显示当前名）、CLI `--name` 标志（`main.ts:687`）、`-r` 选择器内改名（`interactive-mode.ts:5330`）、扩展 API `ctx.setSessionName`。
 
 **解析规则：最后一条胜出，空名显式清除。** 两处实现同一语义：
 
@@ -365,19 +367,19 @@ branch(branchFromId: string): void {
 
 **压缩是路径局部的，因此可逆**：用 `/tree` 跳回压缩点**之前**的节点开分支，新路径不经过压缩条目，`buildContextEntries` 找不到 compaction，自动回退全量原文。文档里 "Compaction is lossy. The full history remains in the JSONL" 的代码级含义即：**有损的是经过压缩节点的那条路径视图，无损的是树本身。**
 
-### 8.1 分界线怎么画：findCutPoint（`compaction.ts:421`）
+### 8.1 分界线怎么画：findCutPoint（`compaction.ts:403`）
 
-`firstKeptEntryId` 是压缩算法的分界线：**线后原文保留，线前只活在摘要里**。画线算法从最新往回累加估算 token，达到 `keepRecentTokens`（默认 20000，`compaction.ts:142`）后就近选一个**合法切点**：
+`firstKeptEntryId` 是压缩算法的分界线：**线后原文保留，线前只活在摘要里**。画线算法从最新往回累加估算 token，达到 `keepRecentTokens`（默认 20000，`compaction.ts:135`）后就近选一个**合法切点**：
 
 - 合法切点的判定在 `isCutPointMessage`（`:320-333`）：`user` / `assistant` / `bashExecution` / `custom` / `branchSummary` / `compactionSummary` 都可以，**唯独 `toolResult` 不行**——避免保留区开头出现没有对应调用的孤儿工具结果（很多 provider 的 API 直接会报错）；切在带工具调用的 assistant 上没问题，它的结果都在后面、一并保留；
 - 切点确定后会向前捎带紧邻的非上下文元数据条目（model_change 等），但不跨越可见消息或旧压缩边界（`:459-464`）；
-- 用 id 而非数组下标记录（正是 v1→v2 迁移的内容，`session-manager.ts:277-279`）：树会分叉，**下标在不同路径上没有稳定含义，id 才有**，且可在 `byId` 中 O(1) 定位。
+- 用 id 而非数组下标记录（正是 v1→v2 迁移的内容，`session-manager.ts:245-246`）：树会分叉，**下标在不同路径上没有稳定含义，id 才有**，且可在 `byId` 中 O(1) 定位。
 
 组装上下文时摘要被**提到最前**：压缩条目在树上挂在保留区之后（它是追加时的新叶子），但模型先读"前情摘要"再读近期原文——按叙事逻辑而非文件顺序。
 
 三个容易搞错的细节：
 
-**① 画线的时候，压缩条目还不存在。** `prepareCompaction` 跑在 `appendCompaction` **之前**（`agent-session.ts:2034` → `:2110`），它拿到的 `pathEntries` 只到最后一条普通消息。设当前有 0~9 十条：
+**① 画线的时候，压缩条目还不存在。** `prepareCompaction` 跑在 `appendCompaction` **之前**（`agent-session.ts:1880` → `:2110`），它拿到的 `pathEntries` 只到最后一条普通消息。设当前有 0~9 十条：
 
 ```text
 boundaryEnd = pathEntries.length = 10        ← 开区间上界，最大下标是 9
@@ -410,7 +412,7 @@ for (let c = 0; c < cutPoints.length; c++) {
 
 分界线是**压缩时刻的快照，不是滑动窗口**：画线后新消息持续追加，线不挪。任意时刻的上下文 = `[摘要] + [画线时定格的保留区] + [线后持续增长的新消息]`，第三段涨到阈值 → 触发下一次压缩 → 画一条新线。上下文占用因此呈**锯齿状**：涨→压→涨→压。
 
-再压缩时**旧摘要被新摘要吞并，不叠罗汉**：下一轮的处理范围从上一条压缩的 `firstKeptEntryId` 起算（`compaction.ts:760`），新摘要的原料 = 旧摘要 + 旧保留区 + 新增消息中被划出的部分，产出**一条**新摘要取而代之。无论压缩多少轮，上下文里永远只有一个摘要块。
+再压缩时**旧摘要被新摘要吞并，不叠罗汉**：下一轮的处理范围从上一条压缩的 `firstKeptEntryId` 起算（`compaction.ts:757`），新摘要的原料 = 旧摘要 + 旧保留区 + 新增消息中被划出的部分，产出**一条**新摘要取而代之。无论压缩多少轮，上下文里永远只有一个摘要块。
 
 ### 8.3 切在轮中间：唯一的例外
 
