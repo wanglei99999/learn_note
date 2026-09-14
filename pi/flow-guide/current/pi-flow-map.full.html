@@ -1,0 +1,917 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pi 全流程总图</title>
+<style>
+  :root {
+    --bg: #f3f3ef; --dot: #d8d8d0; --panel: #ffffff; --line: #e2e2dc; --line-strong: #cfcfc7;
+    --text: #23231f; --muted: #6f6f68; --faint: #9a9a92;
+    --accent: #e8590c; --accent-bg: #fff3eb; --up: #2563eb; --up-bg: #edf3ff; --down: #e8590c;
+    --shadow: 0 1px 2px rgba(30,30,20,.05), 0 6px 20px rgba(30,30,20,.06);
+    --tour-w: 264px;
+    --fs-meta: 11px; --fs-body: 12.5px; --fs-head: 14px; --fs-title: 16px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
+    font-family: system-ui, "Microsoft YaHei", "PingFang SC", sans-serif; font-size: var(--fs-head); }
+  button { font: inherit; font-size: var(--fs-body); padding: 5px 10px; border: 1px solid var(--line-strong); border-radius: 7px;
+    background: var(--panel); color: var(--text); cursor: pointer; }
+  button:hover { background: #f5f5f1; }
+  button[aria-pressed="true"] { background: var(--accent-bg); border-color: var(--accent); color: #9a3a06; }
+
+  /* 画布：点阵背景跟着镜头走，拖动时有空间感 */
+  #stage { position: absolute; inset: 0; cursor: grab; touch-action: none; user-select: none;
+    background-image: radial-gradient(circle, var(--dot) 1px, transparent 1.3px); }
+  #stage.dragging { cursor: grabbing; }
+  #canvas { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+  #canvas svg { display: block; max-width: none !important; }
+  #msg { padding: 70px 0 0 calc(var(--tour-w) + 30px); color: var(--muted); white-space: pre-wrap; }
+
+  /* 顶栏 */
+  #bar { position: fixed; top: 10px; left: calc(var(--tour-w) + 22px); right: 10px; z-index: 5; display: flex;
+    flex-wrap: wrap; gap: 6px; align-items: center; pointer-events: none; }
+  #bar > * { pointer-events: auto; }
+  #bar .grp { display: inline-flex; }
+  #bar .grp > * { border-radius: 0; margin-left: -1px; }
+  #bar .grp > :first-child { border-radius: 7px 0 0 7px; margin-left: 0; }
+  #bar .grp > :last-child { border-radius: 0 7px 7px 0; }
+  #pct { font-size: var(--fs-body); color: var(--muted); background: var(--panel); border: 1px solid var(--line-strong);
+    padding: 5px 8px; min-width: 3.8em; text-align: center; font-variant-numeric: tabular-nums; }
+  #help { position: fixed; top: 50px; left: calc(var(--tour-w) + 22px); z-index: 7; width: 300px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow);
+    padding: 10px 14px; font-size: var(--fs-body); line-height: 1.9; }
+  #help kbd { font: var(--fs-meta) ui-monospace, Consolas, monospace; background: #f1f1ec; border: 1px solid var(--line-strong);
+    border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; margin-right: 2px; }
+
+  /* 左侧：导览 */
+  #tour { position: fixed; top: 10px; left: 10px; bottom: 10px; width: var(--tour-w); z-index: 6; display: flex;
+    flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    box-shadow: var(--shadow); overflow: hidden; }
+  #tour header { padding: 12px 14px 10px; border-bottom: 1px solid var(--line); }
+  #tour .ttl { font-size: var(--fs-title); font-weight: 700; letter-spacing: .2px; }
+  #tour .sub { font-size: var(--fs-body); color: var(--muted); margin-top: 2px; }
+  #steps { flex: 1; overflow: auto; padding: 6px 8px 10px; }
+  .station { border-radius: 9px; margin: 2px 0; }
+  .station.active { background: var(--accent-bg); box-shadow: inset 3px 0 0 var(--accent); }
+  .st-head { display: flex; width: 100%; align-items: baseline; gap: 6px; border: 0; background: none;
+    text-align: left; padding: 7px 10px; border-radius: 9px; }
+  .st-head:hover { background: #f5f5f1; }
+  .station.active .st-head:hover { background: transparent; }
+  .st-head b { font-size: var(--fs-head); font-weight: 600; flex: 1; }
+  .st-head small { font-size: var(--fs-meta); color: var(--faint); }
+  .st-body { display: none; padding: 0 10px 9px 12px; }
+  .station.active .st-body { display: block; }
+  .st-desc { margin: 0 0 6px; font-size: var(--fs-body); line-height: 1.65; color: #55554f; }
+  .shots { list-style: none; margin: 0; padding: 0; }
+  .shot { display: flex; width: 100%; gap: 8px; align-items: baseline; text-align: left; border: 0; background: none;
+    padding: 4px 6px; border-radius: 6px; font-size: var(--fs-body); color: #55554f; }
+  .shot:hover { background: rgba(232,89,12,.07); }
+  .shot .n { flex: none; width: 17px; height: 17px; border-radius: 50%; border: 1px solid #e3b89c; color: #b4541a;
+    font-size: var(--fs-meta); line-height: 15px; text-align: center; font-variant-numeric: tabular-nums; }
+  .shot.active { color: var(--text); font-weight: 600; }
+  .shot.active .n { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .openCard { display: inline-flex; align-items: center; gap: 4px; margin: 0 0 4px; padding: 3px 10px;
+    border-color: #f0c7ad; color: #b4541a; }
+  .openCard:hover, .openCard[aria-expanded="true"] { background: var(--accent-bg); }
+  .cards { margin: 2px 0 6px; }
+  .shots .cards { display: none; margin-left: 31px; }
+  .shot.active ~ .cards { display: block; }
+  .shot-desc { display: none; margin: 2px 0 6px 31px; font-size: var(--fs-body); line-height: 1.65; color: #55554f; }
+  .shot.active + .shot-desc { display: block; }
+
+  /* 左侧：图例（可收起） */
+  #legend { border-top: 1px solid var(--line); font-size: var(--fs-body); }
+  #legend summary { cursor: pointer; padding: 8px 14px; color: var(--muted); font-weight: 600; user-select: none; }
+  #legend .items { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 8px; padding: 0 14px 10px; color: #55554f; }
+  #legend .it { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+  #legend .it svg { flex: none; }
+  #legend .wide { grid-column: 1 / -1; }
+  #tourNav { display: flex; gap: 6px; align-items: center; padding: 8px; border-top: 1px solid var(--line); }
+  #tourNav button { flex: 1; }
+  #counter { font-size: var(--fs-body); color: var(--muted); min-width: 4.2em; text-align: center; font-variant-numeric: tabular-nums; }
+
+  /* 右侧：节点信息 */
+  #info { position: fixed; top: 52px; right: 10px; width: 300px; max-height: calc(100% - 62px); overflow: auto;
+    z-index: 6; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow);
+    padding: 12px 14px; }
+  #info .close { float: right; padding: 1px 8px; margin-left: 6px; }
+  #info h2 { font-size: var(--fs-body); margin: 0 0 8px; white-space: pre-wrap; line-height: 1.55; }
+  #info h3, #dBody .conn h3 { font-size: var(--fs-body); margin: 12px 0 4px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+  #info h3 i, #dBody .conn h3 i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+  #info h3.up, #dBody .conn h3.up { color: var(--up); } #info h3.up i, #dBody .conn h3.up i { background: var(--up); }
+  #info h3.down, #dBody .conn h3.down { color: var(--down); } #info h3.down i, #dBody .conn h3.down i { background: var(--down); }
+  #info ul { list-style: none; margin: 0; padding: 0; }
+  #info li button { width: 100%; text-align: left; margin: 2px 0; font-size: var(--fs-body); line-height: 1.45; border-color: var(--line); }
+  #info li em { font-style: normal; color: var(--muted); }
+  #info .none, #info .trace { font-size: var(--fs-body); color: var(--muted); }
+  #info .trace { margin-top: 10px; padding: 6px 8px; background: #f7f7f3; border-radius: 6px; line-height: 1.6; }
+  #info .openNode { display: block; margin: 0 0 6px; border-color: #f0c7ad; color: #b4541a; }
+  #info .openNode:hover { background: var(--accent-bg); }
+  #info .noCard { margin: 0 0 6px; font-size: var(--fs-body); color: var(--faint); }
+  #info .goStage { width: 100%; text-align: left; font-size: var(--fs-body); background: var(--accent-bg); border-color: #f0c7ad; }
+
+  /* 右侧：这一步的详情卡 */
+  #detail { position: fixed; top: 10px; right: 10px; bottom: 10px; width: min(440px, 38vw); z-index: 6; display: flex;
+    flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    box-shadow: var(--shadow); overflow: hidden; }
+  #detail[hidden] { display: none; }
+  #detail header { display: flex; align-items: center; gap: 8px; padding: 11px 14px 10px; border-bottom: 1px solid var(--line); }
+  #detail .d-kicker { font-size: var(--fs-meta); color: var(--faint); letter-spacing: .5px; }
+  #detail .d-title { font-size: var(--fs-head); font-weight: 700; }
+  #detail header .close { margin-left: auto; padding: 1px 8px; }
+  #dBody { flex: 1; overflow: auto; padding: 4px 18px 22px; font-size: var(--fs-body); line-height: 1.8; color: #33332e; }
+  #dBody h4 { --k: var(--faint); display: flex; align-items: center; gap: 7px; margin: 18px 0 4px;
+    font-size: var(--fs-body); font-weight: 700; color: var(--text); }
+  #dBody h4::before { content: ""; width: 8px; height: 8px; border-radius: 2px; background: var(--k); }
+  #dBody h4.k-code { --k: #8d8d86; } #dBody h4.k-data { --k: #5b8def; } #dBody h4.k-why { --k: var(--accent); }
+  #dBody h4.k-pitfall { --k: #d9534f; } #dBody h4.k-cost { --k: #b7791f; } #dBody h4.k-ext { --k: #d4a017; }
+  #dBody h4.k-pattern { --k: #3c9a3c; } #dBody h4.k-rw { --k: #0f8b8d; }
+  #dBody table { width: 100%; border-collapse: collapse; margin: 6px 0 10px; }
+  #dBody th, #dBody td { padding: 4px 6px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  #dBody th { color: var(--muted); font-weight: 600; }
+  #dBody .conn { margin-top: 22px; padding-top: 4px; border-top: 1px dashed var(--line-strong); }
+  #dBody .conn ul { list-style: none; margin: 0; padding: 0; }
+  #dBody .conn li button { width: 100%; text-align: left; margin: 2px 0; line-height: 1.45; border-color: var(--line); }
+  #dBody .conn li em { font-style: normal; color: var(--muted); }
+  #dBody .conn .none { color: var(--muted); }
+  #dBody p { margin: 4px 0 8px; }
+  #dBody ul, #dBody ol { margin: 4px 0 8px; padding-left: 1.3em; }
+  #dBody li { margin: 2px 0; }
+  #dBody a { color: var(--up); text-decoration: none; }
+  #dBody a:hover { text-decoration: underline; }
+  /* 卡片之间的跳转，和外链（GitHub 源码）区分开 */
+  #dBody a.xref { color: #9a3a06; border-bottom: 1px dashed #e3a57f; }
+  #dBody a.xref:hover { text-decoration: none; background: var(--accent-bg); }
+  #dBody { --mono: "Cascadia Mono", Consolas, ui-monospace, "Microsoft YaHei", monospace; }
+  #dBody :not(pre) > code { font-family: var(--mono); font-size: .92em; background: #f1f1ec; border-radius: 4px; padding: 1px 4px; }
+  /* 面板窄，代码自动换行，不横向滚动 */
+  #dBody pre { margin: 6px 0 10px; padding: 10px 12px; background: #fafaf7; border: 1px solid var(--line); border-radius: 8px;
+    font: var(--fs-body)/1.6 var(--mono); tab-size: 2; white-space: pre-wrap; overflow-wrap: anywhere; }
+  /* 代码高亮：接近 GitHub 浅色 */
+  .hljs-keyword, .hljs-variable.language_ { color: #cf222e; }
+  .hljs-string { color: #0a3069; }
+  .hljs-title, .hljs-title.function_, .hljs-title.class_ { color: #8250df; }
+  .hljs-attr, .hljs-property, .hljs-number, .hljs-literal { color: #0550ae; }
+  .hljs-type, .hljs-built_in { color: #953800; }
+  .hljs-comment { color: #6e7781; font-style: italic; }
+
+  /* 右下：阶段条（缩略图 + 各站标签） */
+  #mini { position: fixed; right: 10px; bottom: 10px; z-index: 6; padding: 8px 8px 8px 40px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
+  #miniBox { position: relative; overflow: hidden; cursor: pointer; border-radius: 4px; background: #fafaf7; }
+  #miniBox svg { display: block; pointer-events: none; opacity: .85; }
+  #miniStage { position: absolute; background: rgba(232,89,12,.14); border-radius: 2px; pointer-events: none; }
+  #miniView { position: absolute; border: 1.5px solid var(--accent); border-radius: 2px; pointer-events: none; }
+  #miniTags { position: absolute; left: 4px; top: 8px; width: 34px; }
+  .tag { position: absolute; right: 2px; border: 0; background: none; padding: 0 3px; font-size: var(--fs-meta); line-height: 14px;
+    color: var(--faint); border-radius: 4px; white-space: nowrap; }
+  .tag:hover { color: var(--text); background: #f1f1ec; }
+  .tag.active { color: #fff; background: var(--accent); }
+
+  /* 高亮：on 全亮 > near 一跳邻居 > ctx 同站其余 > 其他压暗 */
+  #canvas svg g.node { cursor: pointer; }
+  #canvas svg g.node:hover { filter: drop-shadow(0 1px 4px rgba(0,0,0,.22)); }
+  #canvas svg.dim g.node, #canvas svg.dim g.cluster, #canvas svg.dim path[data-edge], #canvas svg.dim g.edgeLabel {
+    opacity: .12; transition: opacity .25s; }
+  #canvas svg.dim .ctx { opacity: .38 !important; }
+  #canvas svg.dim .near { opacity: .68 !important; }
+  #canvas svg.dim .on { opacity: 1 !important; }
+  #canvas svg path.up { stroke: var(--up) !important; stroke-width: 2.4px !important; }
+  #canvas svg path.down { stroke: var(--down) !important; stroke-width: 2.4px !important; }
+  #canvas svg g.node.sel { filter: drop-shadow(0 0 2px var(--accent)) drop-shadow(0 0 7px rgba(232,89,12,.7)); }
+</style>
+<link rel="stylesheet" href="./flow-map-reader/full-color.css">
+<link rel="stylesheet" href="./flow-map-reader/source-note.css">
+</head>
+<body>
+<div id="stage"><div id="canvas"><div id="msg">正在渲染…（需要联网加载 mermaid）</div></div></div>
+
+<nav id="tour">
+  <header><div class="ttl">pi 全流程总图</div><div class="sub" id="sub">按阶段一步步跟</div></header>
+  <div id="steps"></div>
+  <details id="legend">
+    <summary>图例</summary>
+    <div class="items">
+      <span class="it"><svg width="22" height="14"><rect x="1" y="1" width="20" height="12" rx="2" fill="#fff" stroke="#9f9f97"/></svg>普通步骤</span>
+      <span class="it"><svg width="22" height="14"><polygon points="5,1 17,1 21,7 17,13 5,13 1,7" fill="#fff4d6" stroke="#d4a017"/></svg>扩展钩子</span>
+      <span class="it"><svg width="22" height="14"><polygon points="5,1 21,1 17,13 1,13" fill="#e8f1ff" stroke="#5b8def"/></svg>数据形状</span>
+      <span class="it"><svg width="22" height="14"><path d="M3 3v8c0 2 16 2 16 0V3" fill="#eaf7ea" stroke="#3c9a3c"/><ellipse cx="11" cy="3" rx="8" ry="2" fill="#eaf7ea" stroke="#3c9a3c"/></svg>状态 / 存储</span>
+      <span class="it"><svg width="22" height="14"><rect x="1" y="1" width="20" height="12" rx="2" fill="#fde8e8" stroke="#d9534f"/></svg>压缩检查点</span>
+      <span class="it"><svg width="22" height="14"><rect x="1" y="1" width="20" height="12" rx="2" fill="#f0e8ff" stroke="#8a5cd6"/></svg>面向世界</span>
+      <span class="it"><svg width="22" height="14"><polygon points="11,1 21,7 11,13 1,7" fill="#fff" stroke="#9f9f97"/></svg>分支判断</span>
+      <span class="it"><svg width="22" height="14"><rect x="1" y="1" width="20" height="12" rx="6" fill="#fff" stroke="#9f9f97"/></svg>事件 / 起止</span>
+      <span class="it wide"><svg width="22" height="8"><line x1="1" y1="4" x2="21" y2="4" stroke="#8d8d86" stroke-width="1.6"/></svg>实线：数据主路径</span>
+      <span class="it wide"><svg width="22" height="8"><line x1="1" y1="4" x2="21" y2="4" stroke="#8d8d86" stroke-width="1.6" stroke-dasharray="3 3"/></svg>虚线：读写状态、跨阶段</span>
+      <span class="it"><svg width="22" height="8"><line x1="1" y1="4" x2="21" y2="4" stroke="#2563eb" stroke-width="2.4"/></svg>上游：指向它</span>
+      <span class="it"><svg width="22" height="8"><line x1="1" y1="4" x2="21" y2="4" stroke="#e8590c" stroke-width="2.4"/></svg>下游：它指向</span>
+    </div>
+  </details>
+  <div id="tourNav"><button id="prev" title="上一步（←）">← 上一步</button><span id="counter">…</span><button id="next" title="下一步（→）">下一步 →</button></div>
+</nav>
+
+<div id="bar">
+  <button id="overview" title="整张图装进窗口（0）">适应画布</button>
+  <button id="returnStep" title="重新定位到最近阅读的步骤">回到当前步骤</button>
+  <span class="grp"><button id="zoomOut" title="缩小（-）">−</button><span id="pct">…</span><button id="zoomIn" title="放大（+）">+</button></span>
+  <button id="clear" title="取消高亮（Esc）">取消高亮</button>
+  <button id="trace" aria-pressed="false" title="点节点时，沿箭头把整条上游、下游路径都亮出来（T）">追踪整条路径</button>
+  <button id="helpBtn" aria-pressed="false" title="操作说明（?）">?</button>
+</div>
+<aside id="colorKey" aria-label="颜色与高亮图例">
+  <div class="color-types"><strong>节点类型</strong>
+    <span><i class="swatch"></i>普通步骤</span>
+    <span><i class="swatch hook"></i>扩展钩子</span>
+    <span><i class="swatch data"></i>数据</span>
+    <span><i class="swatch store"></i>状态 / 存储</span>
+    <span><i class="swatch compact"></i>压缩相关</span>
+    <span title="模型 API、工具执行"><i class="swatch world"></i>外部交互</span>
+  </div>
+  <div class="color-states"><strong>交互状态</strong>
+    <span><i class="swatch selected"></i>当前节点</span>
+    <span><i class="path up"></i>上游 · 谁指向它</span>
+    <span><i class="path"></i>下游 · 它指向谁</span>
+    <span class="note">变淡表示暂未关注，不代表不可用</span>
+  </div>
+</aside>
+<div id="help" hidden>
+  <div><kbd>←</kbd><kbd>→</kbd> 上一步 / 下一步　<kbd>Shift</kbd>+<kbd>←</kbd><kbd>→</kbd> 跳一站</div>
+  <div>点节点：看它的上游、下游　<kbd>T</kbd> 追踪整条路径</div>
+  <div><kbd>D</kbd> 展开 / 收起这一步的详解</div>
+  <div>节点的详解：点节点，再点面板里的“展开详解”</div>
+  <div>滚轮：上下滚　<kbd>Shift</kbd>+滚轮：左右滚</div>
+  <div><kbd>Ctrl</kbd>+滚轮 或 <kbd>+</kbd><kbd>-</kbd>：缩放　<kbd>0</kbd> 总览</div>
+  <div>拖动：平移　右下角阶段条：点哪去哪</div>
+  <div><kbd>Esc</kbd> 取消高亮、关闭面板</div>
+</div>
+
+<aside id="info" hidden></aside>
+<aside id="detail" hidden>
+  <header><div><div class="d-kicker" id="dKicker"></div><div class="d-title" id="dTitle"></div></div>
+    <button class="close" id="dClose" title="收起">×</button></header>
+  <div id="dBody"></div>
+</aside>
+<div id="mini" hidden><div id="miniTags"></div><div id="miniBox"><div id="miniStage"></div><div id="miniView"></div></div></div>
+
+<script type="module">
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.esm.min.mjs";
+import elkLayouts from "https://cdn.jsdelivr.net/npm/@mermaid-js/layout-elk@1.0.0/dist/mermaid-layout-elk.esm.min.mjs";
+
+import { CODE as SOURCE_CODE, TOUR, CARDS } from "./flow-map-reader/content.js";
+import { colorizeGraph } from "./flow-map-reader/palette.js";
+const CODE = colorizeGraph(SOURCE_CODE);
+const PREFIX = "flow";
+// 旧格式是站点数组；新格式是 { stations, loopBack }，loopBack 里的 "FROM>TO" 是回边，追踪路径时不走
+const CFG = Array.isArray(TOUR) ? { stations: TOUR } : TOUR;
+const LOOP_BACK = new Set(CFG.loopBack || []);
+
+const $ = (id) => document.getElementById(id);
+const stage = $("stage"), canvas = $("canvas"), pct = $("pct"), info = $("info"), mini = $("mini"), detail = $("detail");
+let svg, natW = 0, natH = 0;
+let cam = { s: 1, x: 0, y: 0 };
+let cur = -1;          // 当前在 flat 里的下标
+let lastVisitedStep = 0;
+let selId = null;      // 当前选中的节点
+let trace = false;
+
+const nodes = new Map();      // id -> { id, el, label }
+const clusters = new Map();   // id -> el
+const edges = [];             // { from, to, el, labelEl, text, back }
+let stations = [];            // { label, desc, members:Set, clusterEls:[], box, shots:[{ title, desc, members, box }] }
+let flat = [];                // 每一步 { si, ki }
+
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch { /* 隐私模式等拿不到存储时忽略 */ } },
+};
+
+// ---------- 镜头 ----------
+function usable() {
+  const left = $("tour").getBoundingClientRect().right + 16;
+  const right = !info.hidden ? 326 : !detail.hidden ? detail.offsetWidth + 26 : mini.hidden ? 16 : mini.offsetWidth + 26;
+  const top = $("colorKey").getBoundingClientRect().bottom + 16;
+  return { x: left, y: top, w: Math.max(120, innerWidth - left - right), h: Math.max(120, innerHeight - top - 16) };
+}
+function apply() {
+  canvas.style.transform = `translate(${cam.x}px,${cam.y}px) scale(${cam.s})`;
+  pct.textContent = Math.round(cam.s * 100) + "%";
+  let g = 28 * cam.s;
+  while (g < 14) g *= 2;
+  stage.style.backgroundSize = `${g}px ${g}px`;
+  stage.style.backgroundPosition = `${cam.x}px ${cam.y}px`;
+  drawMini();
+}
+let anim = 0, animTimer = 0;
+function stopAnim() { cancelAnimationFrame(anim); clearTimeout(animTimer); }
+function animateTo(target, ms = 420) {
+  stopAnim();
+  const from = { ...cam }, t0 = performance.now();
+  const tick = (now) => {
+    const k = Math.min(1, (now - t0) / ms), e = 1 - Math.pow(1 - k, 3);
+    cam = { s: from.s + (target.s - from.s) * e, x: from.x + (target.x - from.x) * e, y: from.y + (target.y - from.y) * e };
+    apply();
+    if (k < 1) anim = requestAnimationFrame(tick);
+  };
+  anim = requestAnimationFrame(tick);
+  // 窗口被遮挡时浏览器会暂停 requestAnimationFrame，动画会停在半路；到点直接落到终点
+  animTimer = setTimeout(() => { cancelAnimationFrame(anim); cam = target; apply(); }, ms + 80);
+}
+function zoomAt(f, cx, cy) {
+  stopAnim();
+  const s = Math.min(3, Math.max(0.03, cam.s * f)), k = s / cam.s;
+  cam = { s, x: cx - (cx - cam.x) * k, y: cy - (cy - cam.y) * k };
+  apply();
+}
+// 元素在画布坐标（100% 时的像素）里的包围盒
+function boxOf(el) {
+  const r = el.getBoundingClientRect();
+  return { x: (r.left - cam.x) / cam.s, y: (r.top - cam.y) / cam.s, w: r.width / cam.s, h: r.height / cam.s };
+}
+function union(boxes) {
+  const x1 = Math.min(...boxes.map((b) => b.x)), y1 = Math.min(...boxes.map((b) => b.y));
+  const x2 = Math.max(...boxes.map((b) => b.x + b.w)), y2 = Math.max(...boxes.map((b) => b.y + b.h));
+  return { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
+}
+function camFor(box, maxS = 1, minS = 0.35) {
+  const u = usable(), pad = 28;
+  const s = Math.max(minS, Math.min((u.w - pad) / box.w, (u.h - pad) / box.h, maxS));
+  let x = u.x + (u.w - box.w * s) / 2 - box.x * s;
+  let y = u.y + (u.h - box.h * s) / 2 - box.y * s;
+  if (box.w * s > u.w) x = u.x + pad / 2 - box.x * s;   // 太宽：左对齐
+  if (box.h * s > u.h) y = u.y + pad / 2 - box.y * s;   // 太高：顶对齐，往下滚着看
+  return { s, x, y };
+}
+function centerOn(el, minS = 0.7) {
+  const b = boxOf(el), u = usable(), s = Math.max(cam.s, minS);
+  animateTo({ s, x: u.x + u.w / 2 - (b.x + b.w / 2) * s, y: u.y + u.h / 2 - (b.y + b.h / 2) * s });
+}
+
+// ---------- 图模型 ----------
+function firstLine(id) { return (nodes.get(id)?.label || id).split("\n")[0]; }
+function parseGraph() {
+  const nodeRe = new RegExp("^" + PREFIX + "-flowchart-(.+)-\\d+$");
+  for (const el of svg.querySelectorAll("g.node")) {
+    const m = el.id.match(nodeRe);
+    if (!m) continue;
+    const label = (el.querySelector(".nodeLabel")?.innerText || el.textContent || m[1]).trim();
+    nodes.set(m[1], { id: m[1], el, label });
+    el.dataset.nid = m[1];
+  }
+  for (const el of svg.querySelectorAll("g.cluster")) clusters.set(el.id.slice(PREFIX.length + 1), el);
+  const labelEls = new Map();
+  for (const l of svg.querySelectorAll("g.edgeLabel [data-id]")) labelEls.set(l.getAttribute("data-id"), l.closest("g.edgeLabel"));
+  for (const el of svg.querySelectorAll('path[data-edge="true"]')) {
+    const id = el.getAttribute("data-id") || "";
+    const parts = id.replace(/^L_/, "").replace(/_\d+$/, "").split("_");
+    for (let i = 1; i < parts.length; i++) {
+      const a = parts.slice(0, i).join("_"), b = parts.slice(i).join("_");
+      if (nodes.has(a) && nodes.has(b)) {
+        const labelEl = labelEls.get(id);
+        // labelEl 是 SVG 元素，没有 innerText；文字在里面的 HTML（foreignObject）里
+        const html = labelEl?.querySelector("div, span, p");
+        const text = (html?.innerText || labelEl?.textContent || "").trim().replace(/\s*\n\s*/g, " ");
+        edges.push({ from: a, to: b, el, labelEl, text, back: LOOP_BACK.has(`${a}>${b}`) });
+        break;
+      }
+    }
+  }
+}
+function buildStations() {
+  const nodeBoxes = new Map([...nodes].map(([id, n]) => [id, boxOf(n.el)]));
+  const clusterBoxes = new Map([...clusters].map(([id, el]) => [id, boxOf(el)]));
+  const inside = (b, c) => b.x + b.w / 2 >= c.x && b.x + b.w / 2 <= c.x + c.w && b.y + b.h / 2 >= c.y && b.y + b.h / 2 <= c.y + c.h;
+  // 一组 id（分组或节点）→ 成员节点、涉及的分组、包围盒；分组连同里面嵌套的分组和节点一起算
+  const collect = (view = []) => {
+    const members = new Set(), clusterEls = new Set(), boxes = [];
+    for (const vid of view) {
+      if (clusters.has(vid)) {
+        const cb = clusterBoxes.get(vid);
+        boxes.push(cb);
+        for (const [cid, el] of clusters) if (inside(clusterBoxes.get(cid), cb)) clusterEls.add(el);
+        for (const [nid, nb] of nodeBoxes) if (inside(nb, cb)) members.add(nid);
+      } else if (nodes.has(vid)) {
+        members.add(vid);
+        boxes.push(nodeBoxes.get(vid));
+      }
+    }
+    return { members, clusterEls, box: boxes.length ? union(boxes) : { x: 0, y: 0, w: natW, h: natH } };
+  };
+  stations = (CFG.stations || []).map((st) => {
+    const shotCfgs = st.shots?.length ? st.shots : [{ title: "", desc: "", view: st.view }];
+    const shots = shotCfgs.map((sc) => ({ title: sc.title || "", desc: sc.desc || "", ...collect(sc.view) }));
+    const whole = collect([...(st.view || []), ...shotCfgs.flatMap((sc) => sc.view || [])]);
+    return { label: st.label, desc: st.desc || "", shots, ...whole };
+  });
+  flat = stations.flatMap((st, si) => st.shots.map((_, ki) => ({ si, ki })));
+}
+
+// ---------- 高亮 ----------
+const MARKS = ["on", "near", "ctx", "up", "down", "sel"];
+function clearMarks() {
+  for (const shape of svg.querySelectorAll('[data-selection-stroke]')) {
+    shape.style.setProperty('stroke', shape.dataset.selectionStroke, shape.dataset.selectionPriority);
+    delete shape.dataset.selectionStroke;
+    delete shape.dataset.selectionPriority;
+  }
+  svg.classList.remove("dim");
+  svg.querySelectorAll(MARKS.map((c) => "." + c).join(",")).forEach((e) => e.classList.remove(...MARKS));
+}
+function markEdge(e, ...cls) {
+  e.el.classList.add(...cls);
+  e.labelEl?.classList.add(cls.includes("ctx") && !cls.includes("on") ? "ctx" : "on");
+}
+// 某一步：这一步的节点全亮，同站其余节点半透明，一跳邻居较亮
+function markShot(st, shot) {
+  clearMarks();
+  svg.classList.add("dim");
+  for (const c of st.clusterEls) c.classList.add("on");
+  for (const id of st.members) nodes.get(id)?.el.classList.add("ctx");
+  for (const e of edges) {
+    const a = shot.members.has(e.from), b = shot.members.has(e.to);
+    if (a || b) {
+      markEdge(e, "on");
+      if (!(a && b)) nodes.get(a ? e.to : e.from)?.el.classList.add("near");
+    } else if (st.members.has(e.from) && st.members.has(e.to)) {
+      markEdge(e, "ctx");
+    }
+  }
+  for (const id of shot.members) nodes.get(id)?.el.classList.add("on");
+}
+// 沿箭头方向走到底（不走回边），返回经过的节点和边
+function reach(start, forward) {
+  const seen = new Set([start]), used = [], queue = [start];
+  while (queue.length) {
+    const id = queue.shift();
+    for (const e of edges) {
+      if (e.back || (forward ? e.from : e.to) !== id) continue;
+      used.push(e);
+      const next = forward ? e.to : e.from;
+      if (!seen.has(next)) { seen.add(next); queue.push(next); }
+    }
+  }
+  seen.delete(start);
+  return { nodes: seen, edges: used };
+}
+function markNode(id) {
+  clearMarks();
+  svg.classList.add("dim");
+  const ups = trace ? reach(id, false) : { nodes: new Set(edges.filter((e) => e.to === id).map((e) => e.from)), edges: edges.filter((e) => e.to === id) };
+  const downs = trace ? reach(id, true) : { nodes: new Set(edges.filter((e) => e.from === id).map((e) => e.to)), edges: edges.filter((e) => e.from === id) };
+  for (const e of ups.edges) markEdge(e, "on", "up");
+  for (const e of downs.edges) markEdge(e, "on", "down");
+  for (const n of [...ups.nodes, ...downs.nodes]) nodes.get(n)?.el.classList.add(trace ? "on" : "near");
+  nodes.get(id).el.classList.add("on", "sel");
+  for (const shape of nodes.get(id).el.querySelectorAll('.label-container')) {
+    shape.dataset.selectionStroke = shape.style.getPropertyValue('stroke');
+    shape.dataset.selectionPriority = shape.style.getPropertyPriority('stroke');
+    shape.style.setProperty('stroke', 'var(--selection)', 'important');
+  }
+  return { ups, downs };
+}
+
+// ---------- 阶段导览 ----------
+const stepsEl = $("steps");
+// 左栏里一步的详解入口：步骤卡按钮（节点卡从图上点节点进）
+function cardArea(f) {
+  const wrap = document.createElement("div");
+  wrap.className = "cards";
+  if (stepCardKey(f)) {
+    const b = document.createElement("button");
+    b.className = "openCard";
+    b.title = "展开 / 收起这一步的详解（D）";
+    b.onclick = () => setStepCard(!stepCardShown());
+    wrap.appendChild(b);
+  }
+  return wrap.children.length ? wrap : null;
+}
+function buildSteps() {
+  stepsEl.innerHTML = "";
+  stations.forEach((st, si) => {
+    const box = document.createElement("div");
+    box.className = "station";
+    const head = document.createElement("button");
+    head.className = "st-head";
+    head.innerHTML = "<b></b><small></small>";
+    head.querySelector("b").textContent = st.label;
+    head.querySelector("small").textContent = st.shots.length > 1 ? `${st.shots.length} 步` : "";
+    head.onclick = () => go(flat.findIndex((f) => f.si === si));
+    const body = document.createElement("div");
+    body.className = "st-body";
+    if (st.desc) {
+      const p = document.createElement("p");
+      p.className = "st-desc";
+      p.textContent = st.desc;
+      body.appendChild(p);
+    }
+    if (st.shots.length === 1) {
+      const area = cardArea({ si, ki: 0 });
+      if (area) body.appendChild(area);
+    } else {
+      const ol = document.createElement("ol");
+      ol.className = "shots";
+      st.shots.forEach((shot, ki) => {
+        const li = document.createElement("li");
+        const b = document.createElement("button");
+        b.className = "shot";
+        b.innerHTML = '<span class="n"></span><span class="t"></span>';
+        b.querySelector(".n").textContent = ki + 1;
+        b.querySelector(".t").textContent = shot.title;
+        b.onclick = () => go(flat.findIndex((f) => f.si === si && f.ki === ki));
+        const d = document.createElement("p");
+        d.className = "shot-desc";
+        d.textContent = shot.desc;
+        li.append(b, d);
+        const area = cardArea({ si, ki });
+        if (area) li.appendChild(area);
+        ol.appendChild(li);
+      });
+      body.appendChild(ol);
+    }
+    box.append(head, body);
+    stepsEl.appendChild(box);
+  });
+  $("sub").textContent = `按阶段一步步跟 · ${stations.length} 站 ${flat.length} 步`;
+}
+function showStep() {
+  const f = flat[cur];
+  [...stepsEl.children].forEach((box, si) => {
+    box.classList.toggle("active", !!f && si === f.si);
+    box.querySelectorAll(".shot").forEach((b, ki) => b.classList.toggle("active", !!f && si === f.si && ki === f.ki));
+  });
+  $("counter").textContent = f ? `${cur + 1} / ${flat.length}` : `— / ${flat.length}`;
+  // 滚到整条（标题 + 说明）都露出来；说明比列表还高时至少让标题露出来
+  if (f) (stepsEl.children[f.si].querySelector(".shot.active")?.closest("li") || stepsEl.children[f.si]).scrollIntoView({ block: "nearest" });
+  drawMiniStage();
+}
+function markCurrentShot() {
+  if (cur < 0) return clearMarks();
+  const f = flat[cur];
+  markShot(stations[f.si], stations[f.si].shots[f.ki]);
+}
+function reframe() {
+  if (cur < 0) return;
+  const f = flat[cur];
+  animateTo(camFor(stations[f.si].shots[f.ki].box));
+}
+function go(i, instant = false) {
+  if (!flat.length) return;
+  cur = (i + flat.length) % flat.length;
+  lastVisitedStep = cur;
+  closeInfo();
+  const { si, ki } = flat[cur], st = stations[si], shot = st.shots[ki];
+  markShot(st, shot);
+  showStep();
+  const target = camFor(shot.box);
+  if (instant) { stopAnim(); cam = target; apply(); } else animateTo(target);
+}
+function jumpStation(dir) {
+  if (cur < 0) return go(0);
+  const si = (flat[cur].si + dir + stations.length) % stations.length;
+  go(flat.findIndex((f) => f.si === si));
+}
+
+// ---------- 节点信息 ----------
+function shotOf(id) {
+  const i = flat.findIndex((f) => stations[f.si].shots[f.ki].members.has(id));
+  return i >= 0 ? i : flat.findIndex((f) => stations[f.si].members.has(id));
+}
+// 上游、下游两个列表：节点信息面板和节点卡底部共用
+function connHtml(id) {
+  const ups = edges.filter((e) => e.to === id), downs = edges.filter((e) => e.from === id);
+  const item = (other, text) => `<li><button data-go="${esc(other)}">${esc(firstLine(other))}${text ? ` <em>· ${esc(text)}</em>` : ""}</button></li>`;
+  const list = (es, key) => (es.length ? `<ul>${es.map((e) => item(e[key], e.text)).join("")}</ul>` : `<div class="none">无</div>`);
+  return `<h3 class="up"><i></i>上游（谁指向它）· ${ups.length}</h3>` + list(ups, "from") +
+    `<h3 class="down"><i></i>下游（它指向谁）· ${downs.length}</h3>` + list(downs, "to");
+}
+function select(id, pan = false) {
+  const n = nodes.get(id);
+  if (!n) return;
+  selId = id;
+  nodeCard = null;
+  const { ups, downs } = markNode(id);
+  const fi = shotOf(id);
+  const where = fi >= 0 ? stations[flat[fi].si].label + (stations[flat[fi].si].shots.length > 1 ? " · " + stations[flat[fi].si].shots[flat[fi].ki].title : "") : "";
+  info.innerHTML =
+    `<button class="close" title="关闭（Esc）">×</button><h2>${esc(n.label)}</h2>` +
+    (CARDS.nodes[id]
+      ? `<button class="openNode" data-card="${esc(id)}">展开详解 →</button>`
+      : `<div class="noCard">这个节点还没有详解</div>`) +
+    (fi >= 0 ? `<button class="goStage" data-step="${fi}">回到导览这一步：${esc(where)}</button>` : "") +
+    connHtml(id) +
+    (trace
+      ? `<div class="trace">追踪整条路径：上游 ${ups.nodes.size} 个节点，下游 ${downs.nodes.size} 个。“回到 ④”的回边不算，只看这一遍。</div>`
+      : `<div class="trace">打开顶栏的“追踪整条路径”（T），能看到它一路从哪来、最后流到哪。</div>`);
+  info.hidden = false;
+  renderRight();
+  if (pan) centerOn(n.el);
+  else ensureVisible(n.el);
+}
+function onPanelClick(e) {
+  const t = e.target.closest("button, a[data-card]");
+  if (!t) return;
+  if (t.tagName === "A") e.preventDefault();
+  if (t.classList.contains("close")) clearAll();
+  else if (t.dataset.card) openNodeCard(t.dataset.card);
+  else if (t.dataset.go) select(t.dataset.go, true);
+  else if (t.dataset.step) go(Number(t.dataset.step));
+}
+info.addEventListener("click", onPanelClick);
+$("dBody").addEventListener("click", onPanelClick);
+function closeInfo() {
+  info.hidden = true;
+  selId = null;
+  nodeCard = null;
+  renderRight();
+}
+function clearAll() {
+  clearMarks();
+  cur = -1;
+  closeInfo();
+  showStep();
+}
+
+// ---------- 详解卡 ----------
+// 两种卡共用右侧同一个面板：步骤卡讲这一步整体，节点卡讲具体某个节点。
+// 默认都收起，靠按钮打开：步骤卡在左栏，节点卡在点节点后的信息面板里。
+// 步骤卡打开后跟着上一步 / 下一步换内容，没有步骤卡的步先藏起来。
+let stepCardOn = false;
+let nodeCard = null;          // 打开着的节点卡 id
+let shownKey = null;
+function stepKey(f) {
+  const st = stations[f.si];
+  return st.shots.length > 1 ? `${st.label} · ${st.shots[f.ki].title}` : st.label;
+}
+// 这一步用哪张步骤卡：先找"站名 · 步骤名"，再退回站名
+function stepCardKey(f) {
+  if (CARDS.steps[stepKey(f)]) return stepKey(f);
+  return CARDS.steps[stations[f.si].label] ? stations[f.si].label : null;
+}
+function stepCardShown() { return !detail.hidden && !!shownKey?.startsWith("s:"); }
+// 右侧同一时间只放一样：节点卡 > 节点信息 > 步骤卡 > 阶段条
+function syncMini() {
+  mini.hidden = !miniS || !info.hidden || !detail.hidden;
+  const right = !info.hidden ? 326 : !detail.hidden ? detail.offsetWidth + 26 : 16;
+  $("bar").style.right = right + "px";
+  $("colorKey").style.right = right + "px";
+  $("colorKey").style.top = $("bar").getBoundingClientRect().bottom + 8 + "px";
+  $("help").style.top = $("colorKey").getBoundingClientRect().bottom + 8 + "px";
+}
+function renderRight() {
+  let card = null;
+  if (nodeCard) {
+    const c = CARDS.nodes[nodeCard];
+    card = { key: "n:" + nodeCard, kicker: "节点详解", title: c.title, html: c.html + `<div class="conn">${connHtml(nodeCard)}</div>` };
+  } else if (info.hidden && stepCardOn && cur >= 0) {
+    const k = stepCardKey(flat[cur]);
+    if (k) card = { key: "s:" + k, kicker: "这一步详解", title: k, html: CARDS.steps[k] };
+  }
+  detail.hidden = !card;
+  if (card && card.key !== shownKey) {
+    $("dKicker").textContent = card.kicker;
+    $("dTitle").textContent = card.title;
+    $("dBody").innerHTML = card.html;
+    $("dBody").scrollTop = 0;
+  }
+  shownKey = card ? card.key : null;
+  const stepOpen = stepCardShown();
+  for (const b of stepsEl.querySelectorAll(".openCard")) {
+    b.textContent = stepOpen ? "收起详解" : "展开详解 →";
+    b.setAttribute("aria-expanded", String(stepOpen));
+  }
+  syncMini();
+}
+function setStepCard(on) {
+  stepCardOn = on;
+  // 打开步骤卡时，节点卡和节点信息让位，高亮回到这一步
+  if (on && (nodeCard || !info.hidden)) {
+    nodeCard = null;
+    selId = null;
+    info.hidden = true;
+    markCurrentShot();
+  }
+  renderRight();
+  reframe();   // 面板出现或收起会改变可用宽度，镜头重新对准这一步
+}
+function openNodeCard(id) {
+  const n = nodes.get(id);
+  if (!n || !CARDS.nodes[id]) return;
+  selId = id;
+  nodeCard = id;
+  markNode(id);
+  info.hidden = true;
+  renderRight();
+  ensureVisible(n.el);
+}
+function closeCard() {
+  if (!nodeCard) return setStepCard(false);
+  const id = nodeCard;
+  nodeCard = null;
+  select(id);
+}
+// 面板打开后节点被挡住或跑出画面，就把它挪到中间
+function ensureVisible(el) {
+  const r = el.getBoundingClientRect(), u = usable();
+  if (r.left < u.x || r.right > u.x + u.w || r.top < u.y || r.bottom > u.y + u.h) centerOn(el);
+}
+function setTrace(on) {
+  trace = on;
+  $("trace").setAttribute("aria-pressed", String(on));
+  if (selId && !nodeCard) select(selId);
+}
+function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]); }
+
+// ---------- 阶段条：缩略图 + 各站标签 ----------
+const miniBox = $("miniBox"), miniView = $("miniView"), miniStage = $("miniStage"), miniTags = $("miniTags");
+let miniS = 0, miniSvg = null;
+function buildMini() {
+  miniSvg = svg.cloneNode(true);
+  // 保留 id：mermaid 的样式都写成 #flow …，去掉 id 缩略图就没有样式了
+  miniSvg.removeAttribute("class");
+  miniBox.prepend(miniSvg);
+  miniTags.innerHTML = "";
+  stations.forEach((st, si) => {
+    const b = document.createElement("button");
+    b.className = "tag";
+    b.textContent = st.label.split(" ")[0];
+    b.title = st.label;
+    b.onclick = () => go(flat.findIndex((f) => f.si === si));
+    miniTags.appendChild(b);
+  });
+  syncMini();
+  layoutMini();
+}
+function layoutMini() {
+  if (!miniSvg) return;
+  miniS = Math.min(112 / natW, Math.max(160, innerHeight - 150) / natH);
+  const w = natW * miniS, h = natH * miniS;
+  miniSvg.setAttribute("width", w);
+  miniSvg.setAttribute("height", h);
+  miniBox.style.width = w + "px";
+  miniBox.style.height = h + "px";
+  miniTags.style.height = h + "px";
+  // 标签放在各站中心的高度，挨得太近就往下推，保证不重叠
+  const order = stations.map((st, si) => ({ si, y: (st.box.y + st.box.h / 2) * miniS })).sort((a, b) => a.y - b.y);
+  let last = -Infinity;
+  for (const t of order) {
+    t.y = Math.max(t.y, last + 15);
+    last = t.y;
+    miniTags.children[t.si].style.top = t.y - 7 + "px";
+  }
+  drawMini();
+  drawMiniStage();
+}
+function drawMini() {
+  if (!miniS) return;
+  miniView.style.left = (-cam.x / cam.s) * miniS + "px";
+  miniView.style.top = (-cam.y / cam.s) * miniS + "px";
+  miniView.style.width = (innerWidth / cam.s) * miniS + "px";
+  miniView.style.height = (innerHeight / cam.s) * miniS + "px";
+}
+function drawMiniStage() {
+  if (!miniS) return;
+  const f = flat[cur];
+  [...miniTags.children].forEach((b, si) => b.classList.toggle("active", !!f && si === f.si));
+  miniStage.hidden = !f;
+  if (!f) return;
+  const b = stations[f.si].box;
+  Object.assign(miniStage.style, { left: b.x * miniS + "px", top: b.y * miniS + "px", width: b.w * miniS + "px", height: b.h * miniS + "px" });
+}
+function miniJump(e) {
+  const r = miniBox.getBoundingClientRect();
+  const px = (e.clientX - r.left) / miniS, py = (e.clientY - r.top) / miniS, u = usable();
+  stopAnim();
+  cam = { ...cam, x: u.x + u.w / 2 - px * cam.s, y: u.y + u.h / 2 - py * cam.s };
+  apply();
+}
+let miniDrag = false;
+miniBox.addEventListener("pointerdown", (e) => { miniDrag = true; miniBox.setPointerCapture(e.pointerId); miniJump(e); });
+miniBox.addEventListener("pointermove", (e) => { if (miniDrag) miniJump(e); });
+miniBox.addEventListener("pointerup", () => { miniDrag = false; });
+
+// ---------- 交互 ----------
+stage.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  stopAnim();
+  if (e.ctrlKey) zoomAt(Math.exp(-e.deltaY * 0.002), e.clientX, e.clientY);
+  else if (e.shiftKey) { cam.x -= e.deltaY || e.deltaX; apply(); }
+  else { cam.x -= e.deltaX; cam.y -= e.deltaY; apply(); }
+}, { passive: false });
+
+let drag = null;
+stage.addEventListener("pointerdown", (e) => {
+  if (e.button !== 0) return;
+  stopAnim();
+  drag = { x: e.clientX, y: e.clientY, cx: cam.x, cy: cam.y, moved: false, node: e.target.closest ? e.target.closest("g.node") : null };
+  stage.setPointerCapture(e.pointerId);
+});
+stage.addEventListener("pointermove", (e) => {
+  if (!drag) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  if (!drag.moved && Math.abs(dx) + Math.abs(dy) > 4) { drag.moved = true; stage.classList.add("dragging"); }
+  if (drag.moved) { cam.x = drag.cx + dx; cam.y = drag.cy + dy; apply(); }
+});
+function endDrag() {
+  if (drag && !drag.moved) {
+    if (drag.node?.dataset.nid) select(drag.node.dataset.nid);
+    else clearAll();
+  }
+  drag = null;
+  stage.classList.remove("dragging");
+}
+stage.addEventListener("pointerup", endDrag);
+stage.addEventListener("pointercancel", () => { drag = null; stage.classList.remove("dragging"); });
+
+function overview() { animateTo(camFor({ x: 0, y: 0, w: natW, h: natH }, 1, 0.02)); }
+function toggleHelp(show = $("help").hidden) {
+  $("help").hidden = !show;
+  $("helpBtn").setAttribute("aria-pressed", String(show));
+}
+$("prev").onclick = () => go(cur < 0 ? 0 : cur - 1);
+$("next").onclick = () => go(cur + 1);
+$("overview").onclick = overview;
+$("returnStep").onclick = () => go(lastVisitedStep);
+$("clear").onclick = clearAll;
+$("trace").onclick = () => setTrace(!trace);
+$("helpBtn").onclick = () => toggleHelp();
+$("dClose").onclick = closeCard;
+$("zoomIn").onclick = () => zoomAt(1.25, innerWidth / 2, innerHeight / 2);
+$("zoomOut").onclick = () => zoomAt(0.8, innerWidth / 2, innerHeight / 2);
+addEventListener("keydown", (e) => {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key === "ArrowRight") e.shiftKey ? jumpStation(1) : go(cur + 1);
+  else if (e.key === "ArrowLeft") e.shiftKey ? jumpStation(-1) : go(cur < 0 ? 0 : cur - 1);
+  else if (e.key === "Escape") { toggleHelp(false); clearAll(); }
+  else if (e.key === "+" || e.key === "=") zoomAt(1.25, innerWidth / 2, innerHeight / 2);
+  else if (e.key === "-") zoomAt(0.8, innerWidth / 2, innerHeight / 2);
+  else if (e.key === "0") overview();
+  else if (e.key === "t" || e.key === "T") setTrace(!trace);
+  else if (e.key === "d" || e.key === "D") setStepCard(!stepCardShown());
+  else if (e.key === "?") toggleHelp();
+});
+addEventListener("resize", () => {
+  if (!innerWidth || !innerHeight) return;
+  syncMini(); layoutMini(); apply();
+});
+addEventListener('message', event => {
+  if (event.origin !== location.origin || event.source !== parent || !flat.length) return;
+  if (event.data?.type === 'pi-flow:go' && Number.isInteger(event.data.step) && event.data.step >= 0 && event.data.step < flat.length) {
+    syncMini(); layoutMini(); go(event.data.step, true);
+  } else if (event.data?.type === 'pi-flow:resume') {
+    syncMini(); layoutMini(); apply();
+  }
+});
+
+// 图例：记住上次的开合；第一次打开时，窗口够高才默认展开，免得挤掉导览列表
+const legend = $("legend");
+const legendPref = store.get("flowmap.legend");
+legend.open = legendPref ? legendPref === "open" : innerHeight >= 860;
+// 程序设置 open 也会触发 toggle 事件，所以只在用户点标题时记录
+legend.querySelector("summary").addEventListener("click", () => store.set("flowmap.legend", legend.open ? "closed" : "open"));
+
+// ---------- 渲染 ----------
+try {
+  mermaid.registerLayoutLoaders(elkLayouts);
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: "strict",
+    maxTextSize: 200000,
+    layout: "elk",
+    theme: "base",
+    themeVariables: {
+      fontFamily: 'system-ui, "Microsoft YaHei", "PingFang SC", sans-serif',
+      primaryColor: "#ffffff", primaryBorderColor: "#a5b3a3", primaryTextColor: "#29352f",
+      secondaryColor: "#ffffff", tertiaryColor: "#ffffff", nodeTextColor: "#23231f",
+      lineColor: "#7d8f80", textColor: "#29352f",
+      clusterBkg: "#fafcf8", clusterBorder: "#ced8c8", titleColor: "#465b48",
+      edgeLabelBackground: "#ffffff",
+    },
+    themeCSS: `
+      .cluster rect { rx: 12px; ry: 12px; }
+      .cluster-label .nodeLabel, .cluster-label span { font-weight: 600; }
+      .edgeLabel p, .edgeLabel span { color: #5d5d56; font-size: 13px; }
+    `,
+    flowchart: { useMaxWidth: false, htmlLabels: true },
+  });
+  const { svg: svgText } = await mermaid.render(PREFIX, CODE);
+  canvas.innerHTML = svgText;
+  svg = canvas.querySelector("svg");
+  const vb = svg.viewBox.baseVal;
+  natW = vb.width; natH = vb.height;
+  svg.setAttribute("width", natW);
+  svg.setAttribute("height", natH);
+  apply();
+  parseGraph();
+  buildStations();
+  buildSteps();
+  buildMini();
+  go(0, true);
+  if (parent !== window) parent.postMessage({ type: 'pi-flow:ready' }, location.origin);
+} catch (err) {
+  canvas.innerHTML = '<div id="msg"></div>';
+  $("msg").textContent = "渲染失败：\n" + (err && err.message ? err.message : err);
+}
+</script>
+</body>
+</html>
+

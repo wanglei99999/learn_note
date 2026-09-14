@@ -1,0 +1,287 @@
+[
+  {
+    "OldPath": ".learn-note\\pi\\pi-flow-map.html",
+    "Path": "pi-flow-map.html",
+    "Hash": "1456DBA8AF5ACCB213A24620273BE5D7BF631E78EACC88E56F8E5B436CBAFF6D"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\pi-flow-map.full.html",
+    "Path": "pi-flow-map.full.html",
+    "Hash": "3292344C2EA34D0DE9DED00E11B66F99FDE6A615961F779E7D93C2F1F883A5AF"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\content-guide.html",
+    "Path": "content-guide.html",
+    "Hash": "C78A0B5E560346E37D07B22955C3B5A8894BABB6D1D8063593898C1CA69FF20D"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\pi-flow-map.md",
+    "Path": "pi-flow-map.md",
+    "Hash": "33A68E8870A9CDC8293B733D778F673483D8470999A30A69C197DA0AD1CB64DD"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\pi-flow-map.claude-backup-20260912-183731.html",
+    "Path": "pi-flow-map.claude-backup-20260912-183731.html",
+    "Hash": "429EA7933B718304ADDE5F545C0AAC09FE2256A03D766154B5710BE375E60143"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\flow-map-reader\\content-guide.css",
+    "Path": "flow-map-reader\\content-guide.css",
+    "Hash": "577E15D0675FD3B28401D7E3D700E03044CF71BDB3660F6FD0A7086A525583C6"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\flow-map-reader\\content.js",
+    "Path": "flow-map-reader\\content.js",
+    "Hash": "C994B9F0382FB6EDD88D40CE3B566B44398AB98C40A47BA111DBCA5C9A53F240"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\flow-map-reader\\data.js",
+    "Path": "flow-map-reader\\data.js",
+    "Hash": "4E4448208EBD0DDB710757F7B8E85CBADA55AAB69EF0A3904EB59D0EACB2E5D4"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\flow-map-reader\\full-color.css",
+    "Path": "flow-map-reader\\full-color.css",
+    "Hash": "9C058D9B707A7A973A9E571A5B800F6BA1A4BE9853068A864D0031D2D1273C40"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\flow-map-reader\\guide.js",
+    "Path": "flow-map-reader\\guide.js",
+    "Hash": "F0F83DB2ED9F579D18FD436FED599487A736592F0A990449834018E15AB4F984"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\flow-map-reader\\model.js",
+    "Path": "flow-map-reader\\model.js",
+    "Hash": "AF087280175DD36875A759CD6782708100F418CC19F55BEF383F9DC267DAA598"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\flow-map-reader\\model.test.js",
+    "Path": "flow-map-reader\\model.test.js",
+    "Hash": "F119DE9D59A8C349B38C34E21F96916A275E19DFFDAFCE435F6D9AC377152322"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\flow-map-reader\\palette.js",
+    "Path": "flow-map-reader\\palette.js",
+    "Hash": "089FB18F7241B5A736496277B319AEBBE3F42321DC28E0F9A043572DC5F606BA"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\flow-map-reader\\reader.css",
+    "Path": "flow-map-reader\\reader.css",
+    "Hash": "511927BD393336896F056552017194A246E1EE15E153864D63D29FE3E7C08CD2"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\flow-map-reader\\reader.js",
+    "Path": "flow-map-reader\\reader.js",
+    "Hash": "6C32759CAFBF762E75F9007D258D767823A84446F71295D4B1242671128CF0DB"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\flow-map-reader\\source-note.css",
+    "Path": "flow-map-reader\\source-note.css",
+    "Hash": "EEDBDCE383D3D7EF8CF6B05BF3DA62E602B9B18F7E3E94D24C33DDE1FD675550"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\navigation-backup-20260913\\pi-flow-map.full.html",
+    "Path": "navigation-backup-20260913\\pi-flow-map.full.html",
+    "Hash": "A8039BEBA753BECE4B71B9B0B05FCC1FB4FE5B5F56D0D3E8D35A474960C8138D"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\navigation-backup-20260913\\pi-flow-map.html",
+    "Path": "navigation-backup-20260913\\pi-flow-map.html",
+    "Hash": "6884429547E61E1E1CFA2D0A7A6AEB4D7F19F800EA550F44EC5D680F40F470DB"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\navigation-backup-20260913\\flow-map-reader\\data.js",
+    "Path": "navigation-backup-20260913\\flow-map-reader\\data.js",
+    "Hash": "4E4448208EBD0DDB710757F7B8E85CBADA55AAB69EF0A3904EB59D0EACB2E5D4"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\navigation-backup-20260913\\flow-map-reader\\full-color.css",
+    "Path": "navigation-backup-20260913\\flow-map-reader\\full-color.css",
+    "Hash": "9C058D9B707A7A973A9E571A5B800F6BA1A4BE9853068A864D0031D2D1273C40"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\navigation-backup-20260913\\flow-map-reader\\model.js",
+    "Path": "navigation-backup-20260913\\flow-map-reader\\model.js",
+    "Hash": "0EB14AE40EE3EB81689AA395D83308CAB76ABEB0DF03D907DA4F7D90C3621919"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\navigation-backup-20260913\\flow-map-reader\\model.test.js",
+    "Path": "navigation-backup-20260913\\flow-map-reader\\model.test.js",
+    "Hash": "87621AA72B26D695E648556EF7D598C8404877584AF05B0C2F6980EB9D49DF9C"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\navigation-backup-20260913\\flow-map-reader\\palette.js",
+    "Path": "navigation-backup-20260913\\flow-map-reader\\palette.js",
+    "Hash": "089FB18F7241B5A736496277B319AEBBE3F42321DC28E0F9A043572DC5F606BA"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\navigation-backup-20260913\\flow-map-reader\\reader.css",
+    "Path": "navigation-backup-20260913\\flow-map-reader\\reader.css",
+    "Hash": "6F7A751D1C7C9B1513F3D27A20D6B100D67126116D6247A3EE5542D6423835E9"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\navigation-backup-20260913\\flow-map-reader\\reader.js",
+    "Path": "navigation-backup-20260913\\flow-map-reader\\reader.js",
+    "Hash": "2534ED4D04139D2C9337BADB04D2BCA78FE7B171090E0DF464A462C89D2BC125"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\content-backup-20260913-124531\\pi-flow-map.claude-backup-20260912-183731.html",
+    "Path": "content-backup-20260913-124531\\pi-flow-map.claude-backup-20260912-183731.html",
+    "Hash": "429EA7933B718304ADDE5F545C0AAC09FE2256A03D766154B5710BE375E60143"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\content-backup-20260913-124531\\pi-flow-map.full.html",
+    "Path": "content-backup-20260913-124531\\pi-flow-map.full.html",
+    "Hash": "139A7C5A3D5B2C3F71A651AE3222CFB198145DA8E837AFE7F00D1F5E41002346"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\content-backup-20260913-124531\\pi-flow-map.html",
+    "Path": "content-backup-20260913-124531\\pi-flow-map.html",
+    "Hash": "D8473139AAEEE3EF9AB8838B65595036C72450C3E5239D47291092DF4DE2FF41"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\content-backup-20260913-124531\\sha256.json",
+    "Path": "content-backup-20260913-124531\\sha256.json",
+    "Hash": "9BAA33142CFF9BD3B71575FF61A57B7F1BA9D01DF7D78017A1539B7AA09943F4"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\content-backup-20260913-124531\\flow-map-reader\\data.js",
+    "Path": "content-backup-20260913-124531\\flow-map-reader\\data.js",
+    "Hash": "4E4448208EBD0DDB710757F7B8E85CBADA55AAB69EF0A3904EB59D0EACB2E5D4"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\content-backup-20260913-124531\\flow-map-reader\\full-color.css",
+    "Path": "content-backup-20260913-124531\\flow-map-reader\\full-color.css",
+    "Hash": "9C058D9B707A7A973A9E571A5B800F6BA1A4BE9853068A864D0031D2D1273C40"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\content-backup-20260913-124531\\flow-map-reader\\model.js",
+    "Path": "content-backup-20260913-124531\\flow-map-reader\\model.js",
+    "Hash": "AF087280175DD36875A759CD6782708100F418CC19F55BEF383F9DC267DAA598"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\content-backup-20260913-124531\\flow-map-reader\\model.test.js",
+    "Path": "content-backup-20260913-124531\\flow-map-reader\\model.test.js",
+    "Hash": "F119DE9D59A8C349B38C34E21F96916A275E19DFFDAFCE435F6D9AC377152322"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\content-backup-20260913-124531\\flow-map-reader\\palette.js",
+    "Path": "content-backup-20260913-124531\\flow-map-reader\\palette.js",
+    "Hash": "089FB18F7241B5A736496277B319AEBBE3F42321DC28E0F9A043572DC5F606BA"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\content-backup-20260913-124531\\flow-map-reader\\reader.css",
+    "Path": "content-backup-20260913-124531\\flow-map-reader\\reader.css",
+    "Hash": "511927BD393336896F056552017194A246E1EE15E153864D63D29FE3E7C08CD2"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\content-backup-20260913-124531\\flow-map-reader\\reader.js",
+    "Path": "content-backup-20260913-124531\\flow-map-reader\\reader.js",
+    "Hash": "91C769FE58423C1BFA9474AB7CD5ABC027F4B54963CE2022344ABE3189259A80"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\tools\\flow-map\\.gitignore",
+    "Path": "tools\\flow-map\\.gitignore",
+    "Hash": "4D56952B0FB13BF8F9B6C13A6D4C34A075BAC3AF447636A1DF4335D7576E2F97"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\tools\\flow-map\\check.mjs",
+    "Path": "tools\\flow-map\\check.mjs",
+    "Hash": "30141BBFE14386D9E7D1C100011AC19FF652ACF91DE5B9533EB324C0B8B34E3C"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\tools\\flow-map\\make-viewer.mjs",
+    "Path": "tools\\flow-map\\make-viewer.mjs",
+    "Hash": "4C3F52EC40A8309974F9E8207926B2AA5DC17191349F1C72C4B7C266778A49EA"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\tools\\flow-map\\package-lock.json",
+    "Path": "tools\\flow-map\\package-lock.json",
+    "Hash": "7823D2466C42EA91F21FEA4765DD8CB4F2F774347A2A40DB6D8737FE3525F76A"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\tools\\flow-map\\package.json",
+    "Path": "tools\\flow-map\\package.json",
+    "Hash": "B16A2A69B4C6693BC212C6764ABF9111E0E8A18920C6473D6F8920830F9C9E96"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\tools\\flow-map\\viewer-template.html",
+    "Path": "tools\\flow-map\\viewer-template.html",
+    "Hash": "6922D0930B74E03B40A2862A56CC4A0DE7EFC8425CAA52CB1B2018EEC8C2EC49"
+  },
+  {
+    "OldPath": ".learn-note\\pi\\tools\\flow-map\\.impeccable\\hook.cache.json",
+    "Path": "tools\\flow-map\\.impeccable\\hook.cache.json",
+    "Hash": "41B3585F35658FB66B9618B487DA64BC33951C9E975ED515E2F7D0953D2A4AEE"
+  },
+  {
+    "OldPath": ".learn-note\\skills\\mapping-code-flow\\SKILL.md",
+    "Path": "skills\\mapping-code-flow\\SKILL.md",
+    "Hash": "1A41D134AF387997B96ED9702D796C29248228527896B2B49EC498CB96CCEC7D"
+  },
+  {
+    "OldPath": ".learn-note\\skills\\mapping-code-flow\\reference\\cards.md",
+    "Path": "skills\\mapping-code-flow\\reference\\cards.md",
+    "Hash": "2D8D4CEA9266181CDE96D5341D5174B389943273579C41F151F0BC7A715D83F6"
+  },
+  {
+    "OldPath": ".learn-note\\skills\\mapping-code-flow\\reference\\diagram.md",
+    "Path": "skills\\mapping-code-flow\\reference\\diagram.md",
+    "Hash": "94B824C8551642BB2618E02CD121F407696F05833F5E645A3FA32D7DA5B13B8B"
+  },
+  {
+    "OldPath": ".learn-note\\skills\\mapping-code-flow\\templates\\flow-map.md",
+    "Path": "skills\\mapping-code-flow\\templates\\flow-map.md",
+    "Hash": "CEB0B3B87CB69BC51E6028E209BF474C104E4C99D113485F1B6083E96AEFAF7A"
+  },
+  {
+    "OldPath": ".learn-note\\skills\\mapping-code-flow\\tools\\.gitignore",
+    "Path": "skills\\mapping-code-flow\\tools\\.gitignore",
+    "Hash": "4D56952B0FB13BF8F9B6C13A6D4C34A075BAC3AF447636A1DF4335D7576E2F97"
+  },
+  {
+    "OldPath": ".learn-note\\skills\\mapping-code-flow\\tools\\check.mjs",
+    "Path": "skills\\mapping-code-flow\\tools\\check.mjs",
+    "Hash": "30141BBFE14386D9E7D1C100011AC19FF652ACF91DE5B9533EB324C0B8B34E3C"
+  },
+  {
+    "OldPath": ".learn-note\\skills\\mapping-code-flow\\tools\\link-refs.mjs",
+    "Path": "skills\\mapping-code-flow\\tools\\link-refs.mjs",
+    "Hash": "BDDAF55F9C73E392DBD9428CD5C8C0D86F5DAF78AEDB3F43823F5A26FF0A33EA"
+  },
+  {
+    "OldPath": ".learn-note\\skills\\mapping-code-flow\\tools\\make-viewer.mjs",
+    "Path": "skills\\mapping-code-flow\\tools\\make-viewer.mjs",
+    "Hash": "91A500A38FB04DC6FC72FBAA47060D064083B85D56CAE1681F4709C58534ADA6"
+  },
+  {
+    "OldPath": ".learn-note\\skills\\mapping-code-flow\\tools\\package-lock.json",
+    "Path": "skills\\mapping-code-flow\\tools\\package-lock.json",
+    "Hash": "47964A8D576F1313987DEF69F9E3AD41FAFD13A3940E4E127C54CBEDE31BE36E"
+  },
+  {
+    "OldPath": ".learn-note\\skills\\mapping-code-flow\\tools\\package.json",
+    "Path": "skills\\mapping-code-flow\\tools\\package.json",
+    "Hash": "87721CECFBFCECDB677D355CD52C0C046A56531FD44FDE8E67200FE1D91C1DE5"
+  },
+  {
+    "OldPath": ".learn-note\\skills\\mapping-code-flow\\tools\\viewer-template.html",
+    "Path": "skills\\mapping-code-flow\\tools\\viewer-template.html",
+    "Hash": "06B7C4D54A1BA63D168701498AF2DB064096B12194A9C1FDAC7728C3594BB323"
+  },
+  {
+    "OldPath": ".learn-note\\skills\\building-source-flow-atlas\\SKILL.md",
+    "Path": "skills\\building-source-flow-atlas\\SKILL.md",
+    "Hash": "7603F3C045BDC43C0B517CD28E4CC1530A7E0C08D0451E9538C1C8EFB9E3508D"
+  },
+  {
+    "OldPath": ".learn-note\\skills\\building-source-flow-atlas\\references\\content-model.md",
+    "Path": "skills\\building-source-flow-atlas\\references\\content-model.md",
+    "Hash": "517A9CDE1C88C897662111CB1CE61999A2A6BF75186C3FA9ABDC539403C4EF80"
+  },
+  {
+    "OldPath": ".learn-note\\FLOW-MAP-INDEX.md",
+    "Path": "README.md",
+    "Hash": "0802B9738B1C3E58F5DEE37424B32205207E87273F7DC291311627E2EDE616A6"
+  }
+]
