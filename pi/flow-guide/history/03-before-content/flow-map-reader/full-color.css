@@ -1,0 +1,91 @@
+:root {
+  --bg: #f7f8f4;
+  --dot: #e0e5dc;
+  --text: #29352f;
+  --muted: #657269;
+  --faint: #79867c;
+  --line: #dfe5dc;
+  --line-strong: #bfcbbd;
+  --accent: #256b50;
+  --accent-bg: #edf4e9;
+  --up: #237b87;
+  --up-bg: #e8f4f5;
+  --down: #b75b2b;
+  --selection: #334155;
+}
+
+#colorKey {
+  position: fixed;
+  z-index: 5;
+  top: 50px;
+  left: calc(var(--tour-w) + 22px);
+  right: 16px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fffffff5;
+  padding: 10px 13px;
+  color: #536158;
+  font-size: 11px;
+  box-shadow: 0 2px 8px #253c2710;
+}
+
+.color-types, .color-states {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+}
+.color-states { border-top: 1px solid #edf0e9; padding-top: 8px; margin-top: 8px; }
+#colorKey strong { font-size: 10px; font-weight: 500; color: var(--muted); }
+#colorKey span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+#colorKey .swatch { width: 13px; height: 10px; border: 1px solid #a5b3a3; background: #fff; border-radius: 2px; }
+#colorKey .hook { background: #fff7df; border-color: #aa842e; }
+#colorKey .data { background: #edf3ff; border-color: #7092c3; }
+#colorKey .store { background: #edf6eb; border-color: #6a966b; }
+#colorKey .compact { background: #fbeef0; border-color: #b9808c; }
+#colorKey .world { background: #f3effc; border-color: #9680b8; }
+#colorKey .selected { background: #fff; border: 2px solid var(--selection); }
+#colorKey .path { width: 17px; height: 0; border-top: 2px solid var(--down); }
+#colorKey .path.up { border-top: 2px dashed var(--up); }
+#colorKey .note { color: var(--muted); font-size: 10px; }
+
+/* Type fills remain intact when a node is selected. */
+#canvas svg g.node.sel { filter: drop-shadow(0 1px 3px #33415530); }
+#canvas svg g.node.sel > .label-container,
+#canvas svg g.node.sel > rect,
+#canvas svg g.node.sel > polygon,
+#canvas svg g.node.sel > circle,
+#canvas svg g.node.sel > path {
+  stroke: var(--selection) !important;
+  stroke-width: 3px !important;
+}
+#canvas svg.dim g.node,
+#canvas svg.dim g.cluster,
+#canvas svg.dim path[data-edge],
+#canvas svg.dim g.edgeLabel { opacity: .30; }
+#canvas svg.dim .ctx { opacity: .58 !important; }
+#canvas svg.dim .near { opacity: .82 !important; }
+#canvas svg.dim .on { opacity: 1 !important; }
+#canvas svg path.up { stroke: var(--up) !important; stroke-width: 2.7px !important; stroke-dasharray: 7 4 !important; }
+#canvas svg path.down { stroke: var(--down) !important; stroke-width: 2.7px !important; stroke-dasharray: none !important; }
+#info h3.up i, #dBody .conn h3.up i { background: repeating-linear-gradient(90deg,var(--up) 0 4px,transparent 4px 6px); }
+
+.openCard, #info .openNode, #info .goStage { color: #256b50; border-color: #c5d8bc; }
+.shot .n { color: #426945; border-color: #b7cdb0; }
+button[aria-pressed="true"] { color: #24573e; }
+#dBody a.xref { color: #256b50; border-bottom-color: #9ab493; }
+.shot:hover { background: #256b500b; }
+#miniStage { background: #256b501a; }
+
+/* The expanded shape legend uses the same colors as the canvas. */
+#legend .it:nth-child(2) svg polygon { fill: #fff7df; stroke: #aa842e; }
+#legend .it:nth-child(3) svg polygon { fill: #edf3ff; stroke: #7092c3; }
+#legend .it:nth-child(4) svg path, #legend .it:nth-child(4) svg ellipse { fill: #edf6eb; stroke: #6a966b; }
+#legend .it:nth-child(5) svg rect { fill: #fbeef0; stroke: #b9808c; }
+#legend .it:nth-child(6) svg rect { fill: #f3effc; stroke: #9680b8; }
+#legend .it:nth-child(11) svg line { stroke: var(--up); stroke-dasharray: 4 3; }
+#legend .it:nth-child(12) svg line { stroke: var(--down); }
+
+@media (prefers-reduced-motion: reduce) {
+  #canvas svg * { transition: none !important; }
+}

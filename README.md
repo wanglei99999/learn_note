@@ -4,6 +4,8 @@
 
 ## 目录
 
+- **[pi/flow-guide/](pi/flow-guide/README.md)** — Pi 交互式流程导读：HTML 页面、配套说明、备份与制作技能
+
 - **Learn Claude Code/** — Claude Code 学习笔记
 - **claude code/** — Claude Code 压缩机制等原理笔记
 - **openclaw/** — OpenClaw 架构系列笔记（架构、工具循环、插件、网关等）
