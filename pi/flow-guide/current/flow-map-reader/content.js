@@ -134,6 +134,7 @@ export const TOUR = { ...BASE_TOUR, stations: BASE_TOUR.stations.map(station => 
 })) };
 
 export const CODE = BASE_CODE
+  .replace('messages / tools / systemPrompt<br/>内存里的真身', 'messages / tools / systemPrompt<br/>model / thinkingLevel<br/>Agent 循环使用的当前状态')
   .replace('循环只碰这份副本', '数组独立；内部对象仍共享引用')
   .replace('命令 handler :1188<br/>直接执行，不进 LLM', '命令 handler :1188<br/>执行后返回；handler 可另行调用模型')
   .replace('有 toolCall"', '有 toolCall（length 时返回错误结果）"')
