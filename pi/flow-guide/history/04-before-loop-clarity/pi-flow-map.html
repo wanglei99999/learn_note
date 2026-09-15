@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>pi · 从输入到回答</title>
+<link rel="stylesheet" href="./flow-map-reader/reader.css?v=navigation-1">
+<link rel="stylesheet" href="./flow-map-reader/source-note.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="#overview" aria-label="pi 流程导览首页"><span class="brand-mark">pi</span><span>流程导览<small>CODE ATLAS</small></span></a>
+  <nav class="view-tabs" aria-label="阅读视图">
+    <a href="#overview" data-view="overview">阶段总览</a>
+    <a href="#step=1" data-view="reader" id="reader-tab">逐步阅读</a>
+    <a href="#view=full" data-view="full">完整大图 ↗</a>
+  </nav>
+  <div class="search-wrap"><label class="search-field"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="搜索函数、事件、阶段" aria-label="搜索函数、事件、阶段" autocomplete="off"><kbd>/</kbd></label><div id="search-results" hidden></div></div>
+</header>
+<aside class="sidebar" aria-label="阶段目录">
+  <div class="sidebar-heading"><span>阅读目录</span><span>11 阶段</span></div>
+  <nav id="directory" aria-label="阶段导航"></nav>
+  <div class="sidebar-bottom"><p>沿着一条消息，读懂 pi。</p><button id="help-button" aria-expanded="false">键盘操作 <kbd>?</kbd></button></div>
+</aside>
+<main id="main">
+  <section id="overview-view" aria-labelledby="overview-title">
+    <div class="eyebrow">PI INTERNALS / 01</div>
+    <div class="intro"><div><h1 id="overview-title">从一次输入，<br>到一个完整回答<span>。</span></h1><p>先看阶段之间的关系，再沿着消息走进源码。<br>启动、模型请求、工具执行和会话存储，都在这里。</p></div><div class="intro-aside"><b>11 <small>阶段</small></b><b>21 <small>阅读步骤</small></b><b>61 <small>源码节点</small></b></div></div>
+    <div class="overview-actions"><a class="primary" href="#step=1">开始逐步阅读 <span>→</span></a><a href="./content-guide.html" target="_blank" rel="noopener">消息、分支与恢复说明 ↗</a></div>
+    <div id="overview-map"></div>
+    <div class="overview-foot"><span>已补充消息转换、分支条件与持久化边界 · 2026-09-13</span><span>核对提交 <code>6160683</code></span></div>
+  </section>
+  <section id="reader-view" hidden>
+    <header class="reader-heading"><div><div class="eyebrow" id="step-meta"></div><h1 id="step-title"></h1></div><div class="step-controls"><button id="previous" aria-label="上一步">←</button><span id="step-count"></span><button id="next" aria-label="下一步">→</button></div></header>
+    <nav id="shot-tabs" aria-label="当前阶段步骤"></nav>
+    <div class="reading-workspace">
+      <section class="flow-panel" aria-label="当前步骤流程">
+        <div class="flow-toolbar"><span><i class="live-dot"></i>当前步骤</span><a id="step-full" href="#view=full">在大图中定位 ↗</a><button id="step-detail">步骤说明</button></div>
+        <p id="step-summary"></p>
+        <div class="flow-scroll" id="flow-scroll"><div id="incoming"></div><div id="node-flow"></div><div id="outgoing"></div></div>
+        <footer class="flow-footer"><span>点击节点阅读详解</span><span class="kind-legend"><i class="hook-dot"></i>扩展钩子 <i class="data-dot"></i>数据 <i class="store-dot"></i>状态</span></footer>
+      </section>
+      <aside class="detail-panel" aria-label="源码详解"><header><div><div class="eyebrow" id="detail-kicker">步骤说明</div><h2 id="detail-title"></h2></div><button id="detail-back" hidden>返回步骤</button></header><div id="detail-content"></div></aside>
+    </div>
+  </section>
+  <section id="full-view" hidden><div class="full-heading"><div><h1>完整流程图</h1><p>底色区分节点类型，描边标记选中节点，虚实连线区分上下游。</p></div><nav class="full-return" aria-label="返回阅读"><a href="./content-guide.html" target="_blank" rel="noopener">源码阅读说明 ↗</a><a id="full-reader-back" href="#step=1">返回阅读位置</a><a href="#overview">返回总览 →</a></nav></div><iframe id="full-frame" title="完整流程图 · 语义配色"></iframe></section>
+</main>
+<dialog id="help-dialog"><header><h2>键盘操作</h2><button id="help-close" aria-label="关闭操作说明">×</button></header><p><kbd>←</kbd> <kbd>→</kbd> 上一步 / 下一步</p><p><kbd>/</kbd> 搜索函数、事件、阶段</p><p><kbd>Esc</kbd> 关闭搜索 / 返回步骤说明</p><p>完整大图内保留原版快捷键，点击图内的「?」查看。</p></dialog>
+<noscript>请启用 JavaScript 以查看流程导览。</noscript>
+<script type="module" src="./flow-map-reader/reader.js?v=reading-2"></script>
+</body>
+</html>

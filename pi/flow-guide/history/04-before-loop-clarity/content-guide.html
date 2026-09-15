@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>消息、分支与恢复 · pi 源码阅读说明</title><link rel="stylesheet" href="./flow-map-reader/content-guide.css"></head>
+<body>
+<header><a href="./pi-flow-map.html#overview">← 流程导览</a></header>
+<main>
+<div class="eyebrow">PI INTERNALS / SOURCE NOTES</div><h1>消息如何流动，<br>流程为什么继续。</h1>
+<p class="intro">沿着数据、分支与持久化读源码。这里解释主图省略的条件，并把容易混淆的概念分开。</p>
+<p class="revision">核对版本 <code>6160683</code> · 2026-09-13 · 提供商请求部分以 Anthropic Messages 为例</p>
+<nav id="contents" aria-label="说明目录"></nav>
+<section id="example"><span class="eyebrow">READING EXAMPLE</span><h2>跟着一次“读文件并总结”走完流程</h2>
+<p>以下是帮助理解的示例路径，不是实测输出，也不保证模型一定调用工具。假设 read 工具已启用、文件可读，且没有扩展拦截、错误、插话或压缩。</p>
+<ol class="walkthrough">
+<li><b>用户输入</b><p>“读取 README.md 并总结。”经过输入分流后，组装为 <code>role: user</code> 消息。</p><a href="./pi-flow-map.html#step=6">查看消息组装 →</a></li>
+<li><b>第一次模型响应</b><p>运行时消息转换为模型消息。假设模型返回一个 <code>toolCall</code>：名称 read，参数指向 README.md。</p><a href="./pi-flow-map.html#step=12">查看响应消息 →</a></li>
+<li><b>执行与回传</b><p>校验参数、检查工具钩子，然后执行 read。结果形成 <code>role: toolResult</code>，通过 <code>toolCallId</code> 对应这次调用。</p><a href="./pi-flow-map.html#step=14">查看工具执行 →</a></li>
+<li><b>下一次模型响应</b><p>把工具结果加入上下文，进行下一轮准备，再请求模型生成总结。工具输出和最终总结是两条不同的消息。</p><a href="./pi-flow-map.html#step=15">查看轮间准备 →</a></li>
+<li><b>结束与保存</b><p>若无工具调用、后续队列或停止钩子的额外处理，核心循环结束；Session 继续做收尾检查。消息在各自的 message_end 时追加会话条目，并按持久化条件写文件。</p><a href="./pi-flow-map.html#step=18">查看事件与保存 →</a></li>
+</ol><p>对应源码见下方“输入”“一轮结束后的判断顺序”和“持久化”。</p></section>
+<div id="topics"></div>
+<section id="glossary"><span class="eyebrow">GLOSSARY</span><h2>几个词，分清再读</h2><dl>
+<dt>entry / 条目</dt><dd>会话树中的一条记录；它可以是消息、压缩摘要或设置变化。</dd>
+<dt>parentId / leafId</dt><dd>parentId 指向父条目；leafId 表示当前分支的位置。恢复时沿所选叶节点的路径取上下文。</dd>
+<dt>turn / 一轮</dt><dd>一次 assistant 响应及其对应的工具处理。一个 run 可以包含多轮。</dd>
+<dt>run / 一次运行</dt><dd>一次核心循环调用；Session 为重试或排队消息继续调用时，同一次用户交互可能跨多个 run。</dd>
+<dt>toolCall / toolResult</dt><dd>前者是 assistant 请求执行工具的内容块；后者是工具执行反馈消息，用 toolCallId 关联。</dd>
+<dt>压缩</dt><dd>以摘要替代当前上下文的一部分历史；会话文件中的旧条目保留。</dd>
+</dl></section>
+</main><script type="module" src="./flow-map-reader/guide.js?v=reading-2"></script></body></html>
