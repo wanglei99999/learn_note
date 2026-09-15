@@ -119,35 +119,8 @@ for (const id of ['SNAP','S2','LAZY','SUBS','OUT','POSTN']) {
   CARDS.nodes[id].html = note(TOPICS.find(topic => topic.nodes.includes(id)));
 }
 CARDS.nodes.SUBS.title = 'message_end 追加会话条目';
-CARDS.nodes.RLOOP = {
-  title: 'runLoop：进入请求循环',
-  html: `<p>runAgentLoop 合并历史与本次 prompts，并等待初始消息事件处理完成后，调用 runLoop。首次进入也会检查 steering 队列；后续轮次先通过 prepareNextTurn 刷新上下文与配置。</p><p>有 pendingMessages 就逐条发送消息事件、加入 currentContext.messages 和 newMessages；没有则直接请求模型。循环准备停止时取出的 followUp，也进入这个注入步骤。</p><p>源码：${loop(96)}、${loop(156)}、${loop(201)}、${loop(260)}。</p>`,
-};
-CARDS.nodes.LSTART.html = `<p>本次 prompts 与快照中的历史消息在这里合并：<code>messages: [...context.messages, ...prompts]</code>。随后为每条新消息发送 message_start / message_end，再调用 runLoop。</p><p><code>await emit(event)</code> 调用 Agent 传入的 processEvents 回调，等待状态更新和订阅者处理完成。message_end 不是模型回复完成，而是该条输入消息已完整。</p><p>源码：${loop(96)}、${ref('agent/src/agent.ts',409)}。</p>`;
-CARDS.nodes.INJ.title = '注入待处理消息：steer / followUp';
-CARDS.nodes.INJ.html = BASE_CARDS.nodes.INJ.html.split('<h4 class="k-pitfall">')[0]
-  + `<h4 class="k-pitfall">如何进入这一步</h4><p>pendingMessages 保存待注入的消息。首次进入 runLoop 时就检查 steer；轮间也会检查。准备停止时取出的 followUp 同样进入此数组。没有待处理消息时，直接进入 streamAssistantResponse。</p><p>这里先等待消息事件处理，再把消息追加到 currentContext.messages 和 newMessages。事件回调更新 agent.state，并交给 SessionManager 追加条目；实际写文件取决于持久化设置与首次刷盘状态。</p><p>源码：${loop(167)}、${loop(201)}、${loop(257)}、${loop(260)}。</p>`;
-CARDS.nodes.LSTART.html = BASE_CARDS.nodes.LSTART.html.split('<h4 class="k-pitfall">')[0]
-  + '<h4 class="k-pitfall">消息与轮次的边界</h4>' + CARDS.nodes.LSTART.html
-  + '<p>newMessages 收集本次运行的新消息，包含初始 prompts 和后续回复、工具结果等。历史消息只进入 currentContext，不重复加入 newMessages。输入的 message_end 会触发状态更新和会话条目追加，但不保证立即写入磁盘。</p>';
-CARDS.nodes.RLOOP.html = `<h4 class="k-code">关键源码</h4><p>进入循环后先取一次 steer 队列。以下摘录为 ${loop(164)} 的连续代码；内层循环后续会刷新上下文、注入消息并请求模型。</p>
-<pre><code class="hljs language-ts"><span class="hljs-keyword">let</span> currentContext = initialContext;
-<span class="hljs-keyword">let</span> config = initialConfig;
-<span class="hljs-keyword">let</span> lastCompletedTurn: PrepareNextTurnContext | <span class="hljs-literal">undefined</span>;
-<span class="hljs-comment">// Check for steering messages at start (user may have typed while waiting)</span>
-<span class="hljs-keyword">let</span> pendingMessages: AgentMessage[] = (<span class="hljs-keyword">await</span> config.getSteeringMessages?.()) || [];
-
-<span class="hljs-comment">// Outer loop: continues when queued follow-up messages arrive after agent would stop</span>
-<span class="hljs-keyword">while</span> (<span class="hljs-literal">true</span>) {
-    <span class="hljs-keyword">let</span> hasMoreToolCalls = <span class="hljs-literal">true</span>;
-
-    <span class="hljs-comment">// Inner loop: process tool calls and steering messages</span>
-    <span class="hljs-keyword">while</span> (hasMoreToolCalls || pendingMessages.length &gt; <span class="hljs-number">0</span>) {</code></pre>
-<h4 class="k-pitfall">循环如何继续</h4><p>首次将 hasMoreToolCalls 设为 true，是为了保证进入内层循环并请求一次模型，不表示已经收到工具调用。后续是否继续，由工具批次与排队消息共同决定；外层循环在原本准备停止时检查 followUp。</p>` + CARDS.nodes.RLOOP.html;
-CARDS.nodes.SNAP.html = note(TOPICS.find(topic => topic.id === 'snapshot')) + '<p>快照中的 messages 仅包含已有历史；本次新消息作为另一个参数 prompts 传入 runAgentLoop，在其开头合并。model 和 thinkingLevel 通过 createLoopConfig 单独传递。</p>';
 
 const descriptions = {
-  '④ 发请求前': 'runAgentLoop 合并历史与本次输入，发送消息事件后进入 runLoop。首次也检查 steer；有待处理消息则注入，没有则直接进入上下文转换和模型请求。followUp 在准备停止时取出后也走注入步骤。',
   '③ 快照': '为循环复制 messages 和 tools 数组；数组内的对象仍共享引用。状态通过事件更新，轮间可以刷新上下文与配置。',
   '⑥ 这一轮的结局 · 三种结局': '先判断 error / aborted，再看 toolCall；length 截断的调用不执行。轮后停止钩子、工具批次与消息队列共同决定是否继续。',
   '⑦ 事件分发 · 界面和落盘': '界面用 message_update 显示流式内容；message_end 将消息追加为会话条目。真正写文件还取决于持久化设置与首次刷盘状态。',
@@ -163,16 +136,6 @@ export const TOUR = { ...BASE_TOUR, stations: BASE_TOUR.stations.map(station => 
 export const CODE = BASE_CODE
   .replace('messages / tools / systemPrompt<br/>内存里的真身', 'messages / tools / systemPrompt<br/>model / thinkingLevel<br/>Agent 循环使用的当前状态')
   .replace('循环只碰这份副本', '数组独立；内部对象仍共享引用')
-  .replace('AgentContext 副本<br/>systemPrompt, messages, tools', 'AgentContext 浅快照<br/>systemPrompt、历史 messages、tools')
-  .replace('user 消息推进副本，发 message_end', '历史 + 本次 prompts 合并<br/>为新消息发 start / end 事件')
-  .replace('    INJ[', '    RLOOP["runLoop · :156<br/>首次也检查 steer 队列<br/>后续轮次先刷新上下文与配置"]\n    INJ[')
-  .replace('注入插话 :201<br/>getSteeringMessages', '注入待处理消息 · :201<br/>steer / followUp → pendingMessages<br/>有则追加；无则直接通过')
-  .replace('    LSTART --> HCTX', '    LSTART -->|"调用 runLoop"| RLOOP\n    RLOOP --> INJ')
-  .replace('    INJ --> HCTX', '    INJ -->|"streamAssistantResponse :279"| HCTX')
-  .replace('Q -.->|"轮间来取"| INJ', 'Q -.->|"steer：首次与轮间检查"| INJ')
-  .replace('FU -->|"有：回到 ④"| INJ', 'FU -->|"待处理消息；followUp 在准备停止时取出"| INJ')
-  .replace('LSTART -->|"user 消息"| ME', 'LSTART -.->|"await emit：新消息事件"| ME\n  INJ -.->|"await emit：注入消息事件"| ME')
-  .replace('ME --> PUSH --> DISP --> HEXT', 'ME -->|"emit 回调 → processEvents"| PUSH\n    PUSH -->|"await 已注册的监听器"| DISP\n    DISP --> HEXT')
   .replace('命令 handler :1188<br/>直接执行，不进 LLM', '命令 handler :1188<br/>执行后返回；handler 可另行调用模型')
   .replace('有 toolCall"', '有 toolCall（length 时返回错误结果）"')
   .replace('OUT -->|"纯文本"| FU', 'OUT -->|"无 toolCall"| FU')
