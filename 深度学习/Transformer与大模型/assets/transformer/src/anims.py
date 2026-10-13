@@ -1,6 +1,7 @@
 """Manim animations for 深度学习/Transformer结构详解.md (white background).
 
-Render (1200x600, 20 fps), then convert with ../../manifold/src/gif_tools.py:
+Render (1200x600, 20 fps), then convert with
+深度学习/生成模型与数据几何/assets/manifold/src/gif_tools.py:
     manim -r 1200,600 --fps 20 anims.py RoPE ResidualStream Generation
 """
 import numpy as np

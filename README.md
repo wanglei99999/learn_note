@@ -13,4 +13,4 @@
 - **RAG/** — RAG 检索知识系列（BM25、向量检索、混合检索、重排、评估、GraphRAG 等）
 - **agent-runtime/** — Agent Runtime 平台架构系列（可插拔架构、存储与隔离、策略驱动的单 Agent 平台，以及为读源码准备的 TypeScript 笔记）
 - **[LLM部署/](LLM部署/大模型推理与昇腾部署学习笔记.md)** — 大模型推理、vLLM、昇腾部署学习笔记与 MoE 配图
-- **[深度学习/](深度学习/从流形假说到深度学习.md)** — 从流形假说到深度学习：内在维数与维度灾难、分层空间、WGAN、扩散模型与 Flow Matching
+- **[深度学习/](深度学习/README.md)** — 深度学习原理笔记：Transformer 与大模型（Attention 入门 → Transformer 结构 → KV Cache），生成模型与数据几何（流形假说、WGAN、扩散模型与 Flow Matching）
