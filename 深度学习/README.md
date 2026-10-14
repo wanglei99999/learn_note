@@ -1,18 +1,31 @@
 # 深度学习
 
-深度学习原理笔记，按主题分为两类。每类目录下的 `assets/` 存放配图，配图源码在各自的 `src/` 中。
+深度学习原理笔记，按主题分为三类。每类目录下的 `assets/` 存放配图，配图源码在各自的 `src/` 中。
+
+---
+
+## 神经网络基础
+
+网络怎么搭、怎么学。三篇按顺序读，Transformer 系列里用到的激活函数、交叉熵、残差连接、AdamW、归一化，都在这里讲清楚。
+
+| 顺序 | 笔记 | 核心内容 |
+|------|------|---------|
+| 1 | [线性层与激活函数](神经网络基础/01-线性层与激活函数.md) | 线性层与矩阵乘法；为什么必须有非线性（XOR 手算）；sigmoid、tanh、ReLU、GELU、SiLU 的形状与导数；门控：GLU 到 SwiGLU |
+| 2 | [损失函数与反向传播](神经网络基础/02-损失函数与反向传播.md) | 均方误差与交叉熵，为什么分类不用 MSE；语言模型损失与困惑度；手算反向传播、矩阵形式、6N 估算；梯度消失与爆炸、初始化、残差连接 |
+| 3 | [优化器与训练技巧](神经网络基础/03-优化器与训练技巧.md) | SGD 与学习率上限；动量、Adam、AdamW；预热与余弦衰减；LayerNorm/RMSNorm、Pre-Norm 与残差流尺度问题；Llama 2 的训练配置 |
 
 ---
 
 ## Transformer 与大模型
 
-从一个 attention 的计算讲起，到完整的 Transformer 结构，再到生成时的 KV Cache。三篇按顺序读，后一篇以前一篇为基础。
+从一个 attention 的计算讲起，到完整的 Transformer 结构，再到生成时的 KV Cache。前三篇按顺序读，后一篇以前一篇为基础；第 4 篇是 encoder-decoder 结构的专题，读完第 2 篇即可读。
 
 | 顺序 | 笔记 | 核心内容 |
 |------|------|---------|
 | 1 | [Attention 与 QKV 入门](Transformer与大模型/01-Attention与QKV入门.md) | 词向量、点积、softmax；为什么要分成 Q、K、V 三个向量；手算"它 → 猫"；矩阵形式、$\sqrt{d}$ 缩放与因果 mask |
 | 2 | [Transformer 结构详解](Transformer与大模型/02-Transformer结构详解.md) | 沿一次前向传播讲 tokenizer、embedding、RoPE、多头注意力、残差流、RMSNorm 与 Pre-Norm、SwiGLU FFN、LM head 与采样、训练目标、三种架构、Llama-2-7B 参数拆分 |
 | 3 | [KV Cache 与 Attention QKV 的关系](Transformer与大模型/03-KV-Cache与Attention-QKV.md) | MHA / GQA / MQA、因果注意力为什么让缓存成立、为什么只缓存 K 和 V、缓存大小估算与部署影响、主流优化方法 |
+| 4 | [Encoder-Decoder 与交叉注意力](Transformer与大模型/04-Encoder-Decoder与交叉注意力.md) | 编码器与解码器的分工；交叉注意力的 Q、K、V 来源与手算；teacher forcing、编码器只跑一次、两种 KV Cache；BERT 的 MLM、T5 的 span corruption、BART；与 decoder-only 的比较，Whisper、Stable Diffusion 中的应用 |
 
 几篇之间有少量重叠：
 
