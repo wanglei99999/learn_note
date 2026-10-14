@@ -371,8 +371,49 @@ def params() -> str:
     return svg(1200, 600, b)
 
 
+# ------------------------------------------------------------------ 02 正弦位置编码
+def sinusoidal_pe() -> str:
+    import math
+    b: list[str] = []
+    header(b, "正弦位置编码：每对维度是一个频率不同的波",
+           "d = 6 时的三组频率，圆点是位置 t = 0…7 的 sin 取值，对应正文表格。")
+
+    x0, x1, t_max = 250, 1160, 24
+    sx = (x1 - x0) / t_max
+    b.append(f'<rect x="{x0}" y="120" width="{7 * sx}" height="330" fill="{FILL_SOFT}"/>')
+    b.append(text(x0 + 3.5 * sx, 140, "表中的 8 个位置", 15, GRAY))
+    lx = 860
+    b.append(plain(f"M{lx} 132H{lx + 30}", SERIES[0], 3))
+    b.append(text(lx + 38, 138, "sin（偶数维）", 15, INK, "start"))
+    b.append(plain(f"M{lx + 150} 132H{lx + 180}", SERIES[1], 3, "6 5"))
+    b.append(text(lx + 188, 138, "cos（奇数维）", 15, INK, "start"))
+
+    rows = [(0, "dim0 / dim1", "ω = 1，周期 ≈ 6.3"),
+            (2, "dim2 / dim3", "ω ≈ 0.046，周期 ≈ 135"),
+            (4, "dim4 / dim5", "ω ≈ 0.0022，周期 ≈ 2916")]
+    for r, (i, label, note) in enumerate(rows):
+        cy, amp = 205 + r * 100, 34
+        w = 1 / 10000 ** (i / 6)
+        b.append(text(40, cy - 4, label, 18, INK, "start"))
+        b.append(text(40, cy + 20, note, 14, GRAY, "start"))
+        b.append(plain(f"M{x0} {cy}H{x1}", STROKE_SOFT, 1.5))
+        for fn, color, dash in [(math.sin, SERIES[0], None), (math.cos, SERIES[1], "6 5")]:
+            pts = " ".join(f"{x0 + t / 10 * sx:.1f},{cy - amp * fn(w * t / 10):.1f}"
+                           for t in range(t_max * 10 + 1))
+            ds = f' stroke-dasharray="{dash}"' if dash else ""
+            b.append(f'<polyline points="{pts}" fill="none" stroke="{color}" stroke-width="2.5"{ds}/>')
+        for t in range(8):
+            b.append(f'<circle cx="{x0 + t * sx:.1f}" cy="{cy - amp * math.sin(w * t):.1f}" r="4.5" '
+                     f'fill="{SERIES[0]}" stroke="#ffffff" stroke-width="1.5"/>')
+    for t in range(0, t_max + 1, 4):
+        b.append(text(x0 + t * sx, 474, str(t), 14, GRAY))
+    b.append(text(x1, 496, "位置 t", 15, GRAY, "end"))
+    return svg(1200, 520, b)
+
+
 FIGS = {
     "01-overview": overview,
+    "02-sinusoidal-pe": sinusoidal_pe,
     "03-block": block,
     "05-ffn": ffn,
     "07-architectures": architectures,
