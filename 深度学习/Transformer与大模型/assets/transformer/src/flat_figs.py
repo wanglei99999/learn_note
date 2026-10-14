@@ -411,6 +411,63 @@ def sinusoidal_pe() -> str:
     return svg(1200, 520, b)
 
 
+# ------------------------------------------------------------------ 09 encoder-decoder
+def encoder_decoder() -> str:
+    b: list[str] = []
+    header(b, "Encoder-decoder：编码器读一次原文，解码器边生成边查原文",
+           "以翻译“我爱猫 → I love cats”为例，解码器正在预测第 3 个词。")
+    ex, dx, w = 300, 820, 340
+
+    # encoder column
+    b.append(text(ex, 132, "编码器（Encoder）", 22))
+    b.append(node(ex, 150, w, 52, "源语言：我 爱 猫", fill=FILL_SOFT, stroke=STROKE_SOFT))
+    b.append(arrow(f"M{ex} 202V230"))
+    b.append(node(ex, 230, w, 52, "Embedding + 位置编码"))
+    b.append(arrow(f"M{ex} 282V316"))
+    b.append(box(ex - w / 2 - 20, 316, w + 40, 240, "none", "#9ca3af", 2, "6,4"))
+    b.append(box(ex + w / 2 - 70, 326, 80, 28, "#dbeafe", BLUE, 2, rx=14))
+    b.append(text(ex + w / 2 - 30, 346, "× N", 15, BLUE))
+    b.append(node(ex, 366, w, 70, "双向自注意力", "每个词看整句，没有因果 mask"))
+    b.append(arrow(f"M{ex} 436V464"))
+    b.append(node(ex, 464, w, 70, "FFN", "逐位置加工"))
+    b.append(arrow(f"M{ex} 556V590"))
+    b.append(node(ex, 590, w, 70, "编码器输出 H", "[3, d]：每个源词一个向量，只算一次",
+                  fill=FILL_OUT, stroke=STROKE_OUT))
+
+    # decoder column
+    b.append(text(dx, 132, "解码器（Decoder）", 22))
+    b.append(node(dx, 150, w, 52, "已生成：&lt;s&gt; I love", fill=FILL_SOFT, stroke=STROKE_SOFT))
+    b.append(arrow(f"M{dx} 202V230"))
+    b.append(node(dx, 230, w, 52, "Embedding + 位置编码"))
+    b.append(arrow(f"M{dx} 282V316"))
+    b.append(box(dx - w / 2 - 20, 316, w + 40, 330, "none", "#9ca3af", 2, "6,4"))
+    b.append(box(dx + w / 2 - 70, 326, 80, 28, "#dbeafe", BLUE, 2, rx=14))
+    b.append(text(dx + w / 2 - 30, 346, "× N", 15, BLUE))
+    b.append(node(dx, 366, w, 70, "因果自注意力", "只看已生成的部分"))
+    b.append(arrow(f"M{dx} 436V460"))
+    b.append(node(dx, 460, w, 70, "交叉注意力", "Q 来自解码器，K、V 来自 H", stroke=BLUE, sw=2.5))
+    b.append(arrow(f"M{dx} 530V554"))
+    b.append(node(dx, 554, w, 70, "FFN", "逐位置加工"))
+    b.append(arrow(f"M{dx} 646V680"))
+    b.append(node(dx, 680, w, 52, "LM head + softmax"))
+    b.append(arrow(f"M{dx} 732V760"))
+    b.append(node(dx, 760, w, 52, "下一个词：cats", fill=FILL_OUT, stroke=STROKE_OUT))
+
+    # H feeds every decoder layer's cross-attention
+    turn = dx - w / 2 - 40
+    b.append(arrow(f"M{ex + w / 2} 625H{turn}V495H{dx - w / 2 - 2}", BLUE, 3))
+    b.append(text(ex + w / 2 + 12, 652, "K、V", 18, BLUE, "start"))
+    b.append(text(ex + w / 2 + 12, 676, "每层共用 H", 15, GRAY, "start"))
+
+    # autoregressive loop on the right
+    b.append(arrow(f"M{dx + w / 2} 786H{dx + w / 2 + 50}V176H{dx + w / 2 + 2}", "#9ca3af", 2))
+    b.append(f'<text x="{dx + w / 2 + 72}" y="480" font-size="15" fill="{GRAY}" text-anchor="middle" '
+             f'transform="rotate(90 {dx + w / 2 + 72} 480)">追加到已生成序列，再预测下一个</text>')
+    b.append(text(40, 852, "编码器只在开始时跑一次；解码器每生成一个词跑一次，"
+                  "交叉注意力的 K、V 由 H 算出，整个生成过程中都不变。", 17, GRAY, "start"))
+    return svg(1200, 880, b)
+
+
 FIGS = {
     "01-overview": overview,
     "02-sinusoidal-pe": sinusoidal_pe,
@@ -418,6 +475,7 @@ FIGS = {
     "05-ffn": ffn,
     "07-architectures": architectures,
     "08-params": params,
+    "09-encoder-decoder": encoder_decoder,
 }
 
 for name, fn in FIGS.items():
