@@ -1,6 +1,6 @@
 # 深度学习
 
-深度学习原理笔记，按主题分为三类。每类目录下的 `assets/` 存放配图，配图源码在各自的 `src/` 中。
+深度学习原理笔记，按主题分为四类。每类目录下的 `assets/` 存放配图，配图源码在 `assets/` 下的 `src/` 中。
 
 ---
 
@@ -32,7 +32,23 @@
 - 第 3 篇的第 1 节"从 QKV 开始"是第 1 篇的浓缩版。读过第 1 篇，可以从第 3 篇的第 2 节读起。
 - 第 2 篇的 5.2 节简要介绍了多头和 GQA，第 3 篇的第 2 节讲得更细，并配有 MHA / GQA / MQA 对比图。
 
-只关心推理部署，想知道 KV Cache 为什么是关键指标，可以直接读第 3 篇；遇到 QKV 和多头的概念再回到第 1、2 篇。
+只关心推理部署，想知道 KV Cache 为什么是关键指标，可以直接读第 3 篇；遇到 QKV 和多头的概念再回到第 1、2 篇。vLLM、量化、多卡并行等工程内容在 [LLM部署](../LLM部署/大模型推理与昇腾部署学习笔记.md) 中。
+
+---
+
+## 大模型训练
+
+Transformer 系列讲的是模型怎么算，这一类讲权重是怎么训练出来的：一个只会续写文本的预训练模型，经过哪些步骤变成能听指令、按模板对话、调用工具、多步推理的助手。建议读完 Transformer 系列第 2 篇再读，按顺序读。配图源码在 `大模型训练/assets/src/`，风格与前两类不同，用的是 Anthropic 风格。
+
+| 顺序 | 笔记 | 核心内容 |
+|------|------|---------|
+| 1 | [预训练与 Scaling Law](大模型训练/01-预训练与Scaling-Law.md) | Common Crawl 的清洗流程与 LLaMA 数据配比；$C pprox 6ND$ 与 MFU 手算；Kaplan 幂律、Chinchilla IsoFLOP 与“每参数 20 token”；为什么现在的小模型都训过头；base 模型能做什么 |
+| 2 | [SFT 与 Chat 模板](大模型训练/02-SFT与Chat模板.md) | SFT 数据的规模与表面对齐假说；ChatML 与 special token；loss mask 手算、结束符为什么要算 loss；工具调用在序列里的样子；system prompt 与指令层级 |
+| 3 | [RLHF 与 DPO](大模型训练/03-RLHF与DPO.md) | InstructGPT 三步；Bradley–Terry 奖励模型；PPO 的四个模型；β 与 KL 约束的数值例子、过度优化、变长与谄媚；DPO 推导与手算；Constitutional AI |
+| 4 | [推理模型与强化学习](大模型训练/04-推理模型与强化学习.md) | 可验证奖励与只看结果；GRPO 组内优势手算、DAPO 的改进；DeepSeek-R1-Zero 与 R1 的训练流程、蒸馏；test-time compute、pass@k 与 RL 的能力边界；思考过程是否可信 |
+| 5 | [LoRA 与参数高效微调](大模型训练/05-LoRA与参数高效微调.md) | 全参数微调的显存账；内在维度；LoRA 结构、秩 1 手算与参数量计算；QLoRA；多 LoRA 部署；LoRA 与全参数微调的差距；何时微调、何时 RAG |
+
+第 5 篇和前四篇相对独立，读完第 2 篇就能读。"微调还是 RAG"的取舍在 [RAG 系列第 12 章](../RAG/RAG%20检索知识/ch12-rag-vs-finetuning.md) 中也有讨论。
 
 ---
 
