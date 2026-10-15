@@ -42,7 +42,7 @@ Transformer 系列讲的是模型怎么算，这一类讲权重是怎么训练�
 
 | 顺序 | 笔记 | 核心内容 |
 |------|------|---------|
-| 1 | [预训练与 Scaling Law](大模型训练/01-预训练与Scaling-Law.md) | Common Crawl 的清洗流程与 LLaMA 数据配比；$C pprox 6ND$ 与 MFU 手算；Kaplan 幂律、Chinchilla IsoFLOP 与“每参数 20 token”；为什么现在的小模型都训过头；base 模型能做什么 |
+| 1 | [预训练与 Scaling Law](大模型训练/01-预训练与Scaling-Law.md) | Common Crawl 的清洗流程与 LLaMA 数据配比；$C \approx 6ND$ 与 MFU 手算；Kaplan 幂律、Chinchilla IsoFLOP 与“每参数 20 token”；为什么现在的小模型都训过头；base 模型能做什么 |
 | 2 | [SFT 与 Chat 模板](大模型训练/02-SFT与Chat模板.md) | SFT 数据的规模与表面对齐假说；ChatML 与 special token；loss mask 手算、结束符为什么要算 loss；工具调用在序列里的样子；system prompt 与指令层级 |
 | 3 | [RLHF 与 DPO](大模型训练/03-RLHF与DPO.md) | InstructGPT 三步；Bradley–Terry 奖励模型；PPO 的四个模型；β 与 KL 约束的数值例子、过度优化、变长与谄媚；DPO 推导与手算；Constitutional AI |
 | 4 | [推理模型与强化学习](大模型训练/04-推理模型与强化学习.md) | 可验证奖励与只看结果；GRPO 组内优势手算、DAPO 的改进；DeepSeek-R1-Zero 与 R1 的训练流程、蒸馏；test-time compute、pass@k 与 RL 的能力边界；思考过程是否可信 |
