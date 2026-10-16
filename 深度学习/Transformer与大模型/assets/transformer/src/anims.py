@@ -3,6 +3,8 @@
 Render (1200x600, 20 fps), then convert with
 深度学习/生成模型与数据几何/assets/manifold/src/gif_tools.py:
     manim -r 1200,600 --fps 20 anims.py RoPE ResidualStream Generation
+    python gif_tools.py <video.mp4> <out.gif> 20 [colors]
+Generation needs colors=128; at the default 64 the top probability bar is quantized to gray.
 """
 import numpy as np
 from manim import *
@@ -134,7 +136,7 @@ class RoPE(Scene):
 
 # --------------------------------------------------------- 残差流
 def vec_column(values: list[float], high: ManimColor, cell: float = 0.3) -> VGroup:
-    cells = [Square(cell, fill_color=interpolate_color(ManimColor("#FFFFFF"), high, float(np.clip(v, 0.05, 1))),
+    cells = [Square(cell, fill_color=interpolate_color(WHITE, high, float(np.clip(v, 0.05, 1))),
                     fill_opacity=1, stroke_color=high, stroke_width=1.5) for v in values]
     return VGroup(*cells).arrange(DOWN, buff=0.04)
 
