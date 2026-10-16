@@ -46,10 +46,14 @@ PANEL_AREA = 50_000  # px²; above this a tinted rect holds content, so keep it 
 FONT_OLD = "<style>text{font-family:'Microsoft YaHei','SimHei',sans-serif}</style>"
 SHADOW = ('<filter id="soft"><feDropShadow dx="0" dy="2" stdDeviation="5" flood-color="#000" '
           'flood-opacity="0.06"/></filter>')
-CLAY_MARKER = (f'<marker id="arrow-clay" markerWidth="10" markerHeight="8" refX="9" refY="4" '
-               f'orient="auto"><path d="M0 0L10 4L0 8Z" fill="{cs.CLAY}"/></marker>')
-
 ATTR = re.compile(r'([\w:-]+)="([^"]*)"')
+# old markers scale with stroke width (a 2.5px line got a 25px head); claude_style uses fixed 12px heads
+MARKER = re.compile(r'<marker id="([^"]+)"[^>]*>\s*<path[^>]*fill="([^"]+)"[^>]*/>\s*</marker>')
+
+
+def _marker(mid: str, fill: str) -> str:
+    return (f'<marker id="{mid}" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" '
+            f'markerUnits="userSpaceOnUse"><path d="M0 0L12 6L0 12Z" fill="{fill}"/></marker>')
 TAG = re.compile(r'<(rect|circle|line|path|polyline|text|tspan)\b([^>]*?)(/?)>')
 
 
@@ -60,7 +64,7 @@ def _num(a: dict[str, str], k: str, default: float = 0.0) -> float:
         return default
 
 
-def _rect(a: dict[str, str], semantic_blue: bool) -> None:
+def _rect(a: dict[str, str]) -> None:
     fill, stroke = a.get("fill", "").lower(), a.get("stroke", "").lower()
     w, h = _num(a, "width"), _num(a, "height")
     rx = _num(a, "rx")
@@ -136,7 +140,7 @@ def _restyle_tag(m: re.Match, semantic_blue: bool) -> str:
     tag, body, close = m.group(1), m.group(2), m.group(3)
     a = dict(ATTR.findall(body))
     if tag == "rect":
-        _rect(a, semantic_blue)
+        _rect(a)
     elif tag in ("text", "tspan"):
         _text(a, semantic_blue)
     else:
@@ -152,12 +156,11 @@ def _restyle_defs(svg: str, semantic_blue: bool) -> str:
     m = re.search(r"<defs>.*?</defs>", svg, re.S)
     if not m:
         return svg
-    defs = m.group(0)
     # marker heads: generic arrows go gray, unless blue carries meaning
-    defs = defs.replace(f'fill="{OLD_BLUE}"', f'fill="{SERIES_BLUE if semantic_blue else cs.LABEL}"')
-    for old, new in SIMPLE.items():
-        defs = defs.replace(f'fill="{old}"', f'fill="{new}"')
-    defs = defs.replace("</defs>", CLAY_MARKER + SHADOW + "</defs>")
+    blue = SERIES_BLUE if semantic_blue else cs.LABEL
+    markers = [_marker(mid, blue if fill.lower() == OLD_BLUE else SIMPLE.get(fill.lower(), fill))
+               for mid, fill in MARKER.findall(m.group(0))]
+    defs = "<defs>" + "".join(markers) + _marker("arrow-clay", cs.CLAY) + SHADOW + "</defs>"
     return svg[:m.start()] + defs + svg[m.end():]
 
 
