@@ -1,22 +1,24 @@
-"""Manim figures for 深度学习/从流形假说到深度学习.md (white background)."""
+"""Manim figures for 深度学习/从流形假说到深度学习.md (Style 6: cream background)."""
 import numpy as np
 from manim import *
 
-config.background_color = WHITE
+BG = ManimColor("#F8F6F3")
+config.background_color = BG
 config.frame_width = 16
 config.frame_height = 8
 
-INK = ManimColor("#1F2937")
-MUTED = ManimColor("#6B7280")
-FAINT = ManimColor("#D1D5DB")
-BLUE_ = ManimColor("#2563EB")
-ORANGE_ = ManimColor("#EA580C")
-GREEN_ = ManimColor("#059669")
+# palette mirrors 大模型训练/assets/src/claude_style.py
+INK = ManimColor("#1A1A1A")
+MUTED = ManimColor("#6A6A6A")
+FAINT = ManimColor("#D6D0C7")
+BLUE_ = ManimColor("#4F86C0")
+ORANGE_ = ManimColor("#D97757")
+GREEN_ = ManimColor("#3F9C86")
 FONT = "Microsoft YaHei"
 
 
-def zh(s, size=24, color=INK):
-    return Text(s, font=FONT, font_size=size, color=color)
+def zh(s, size=24, color=INK, weight=NORMAL):
+    return Text(s, font=FONT, font_size=size, color=color, weight=weight)
 
 
 def tex(s, size=34, color=INK):
@@ -24,7 +26,7 @@ def tex(s, size=34, color=INK):
 
 
 def header(scene, title, subtitle):
-    t = zh(title, 34).to_corner(UL, buff=0.6)
+    t = zh(title, 32, weight=BOLD).to_corner(UL, buff=0.6)
     s = zh(subtitle, 20, MUTED).next_to(t, DOWN, aligned_edge=LEFT, buff=0.2)
     scene.add(t, s)
     return VGroup(t, s)
@@ -163,7 +165,7 @@ class ParallelLines(Scene):
         ln2 = np.log(2)
         js_l = Line(ax.c2p(-2, ln2), ax.c2p(0, ln2), color=ORANGE_, stroke_width=6)
         js_r = Line(ax.c2p(0, ln2), ax.c2p(2, ln2), color=ORANGE_, stroke_width=6)
-        hollow = Circle(radius=0.08, color=ORANGE_, stroke_width=4).set_fill(WHITE, 1).move_to(ax.c2p(0, ln2))
+        hollow = Circle(radius=0.08, color=ORANGE_, stroke_width=4).set_fill(BG, 1).move_to(ax.c2p(0, ln2))
         filled = Dot(ax.c2p(0, 0), radius=0.08, color=ORANGE_)
         sig = 0.5
         noisy = DashedVMobject(
@@ -200,13 +202,17 @@ def band_image(thetas_colors, sigma, length, xlim, ylim, unit_px=120):
     X, Y = np.meshgrid(xs, ys)
     verf = np.vectorize(erf)
     gy = 0.5 * (verf(Y / (sqrt(2) * sigma)) - verf((Y - length) / (sqrt(2) * sigma)))
-    img = np.ones((h, w, 3))
+    # RGBA with a transparent base, so the bands sit on the page background without a visible box
+    premul = np.zeros((h, w, 3))
+    alpha = np.zeros((h, w))
     for x0, color in thetas_colors:
         a = (np.exp(-(X - x0) ** 2 / (2 * sigma**2)) * gy)
         a = 0.62 * a / a.max()
         rgb = np.array(color.to_rgb())
-        img = img * (1 - a[..., None]) + rgb * a[..., None]
-    return (img * 255).astype(np.uint8)
+        premul = rgb * a[..., None] + premul * (1 - a[..., None])
+        alpha = a + alpha * (1 - a)
+    straight = premul / np.maximum(alpha, 1e-6)[..., None]
+    return (np.dstack([straight, alpha]) * 255).astype(np.uint8)
 
 
 class NoiseSmoothing(Scene):

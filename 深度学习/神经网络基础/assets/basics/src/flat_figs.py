@@ -1,13 +1,17 @@
 """Flat-style SVG figures for 深度学习/神经网络基础/*.md.
 
 Usage: python flat_figs.py <output_dir>
-Same style as Transformer与大模型/assets/transformer/src/flat_figs.py:
-white background, Microsoft YaHei, light fills with thin borders, blue accent.
+Drawn in the old flat palette, then converted to Style 6 (Claude Official) by
+大模型训练/assets/src/flat_to_claude.py. Blue/orange carry meaning here
+(forward value / backward gradient), so the conversion keeps blue as a data color.
 """
 import math
 import sys
 from pathlib import Path
 from typing import Callable
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "大模型训练" / "assets" / "src"))
+from flat_to_claude import restyle  # noqa: E402
 
 OUT = Path(sys.argv[1])
 OUT.mkdir(parents=True, exist_ok=True)
@@ -365,5 +369,5 @@ FIGS = {
 }
 
 for name, fn in FIGS.items():
-    (OUT / f"{name}.svg").write_text(fn(), encoding="utf-8")
+    (OUT / f"{name}.svg").write_text(restyle(fn(), semantic_blue=True), encoding="utf-8")
 print("ok")
