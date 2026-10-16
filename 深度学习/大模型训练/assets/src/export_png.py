@@ -26,13 +26,15 @@ def export(svg: Path) -> None:
                     "--force-device-scale-factor=2", f"--window-size={w},{h}",
                     f"--screenshot={png}", svg.as_uri()],
                    check=True, capture_output=True, timeout=60)
-    print("png", png.relative_to(ASSETS))
+    print("png", png.name)
 
 
 def main() -> None:
+    """Args are topic names under assets/, or paths to any directory of SVGs."""
     topics = sys.argv[1:] or [p.name for p in ASSETS.iterdir() if p.is_dir() and p.name != "src"]
     for t in topics:
-        for svg in sorted((ASSETS / t).glob("*.svg")):
+        folder = Path(t) if Path(t).is_dir() else ASSETS / t
+        for svg in sorted(folder.glob("*.svg")):
             export(svg)
 
 

@@ -1,4 +1,4 @@
-"""Manim animations for 深度学习/Transformer结构详解.md (white background).
+"""Manim animations for 深度学习/Transformer结构详解.md (Style 6: cream background, soft fills).
 
 Render (1200x600, 20 fps), then convert with
 深度学习/生成模型与数据几何/assets/manifold/src/gif_tools.py:
@@ -7,24 +7,26 @@ Render (1200x600, 20 fps), then convert with
 import numpy as np
 from manim import *
 
-config.background_color = WHITE
+config.background_color = ManimColor("#F8F6F3")
 config.frame_width = 16
 config.frame_height = 8
 
-INK = ManimColor("#1F2937")
-MUTED = ManimColor("#6B7280")
-FAINT = ManimColor("#D1D5DB")
-BLUE_ = ManimColor("#2563EB")
-BLUE_SOFT = ManimColor("#EFF6FF")
-BLUE_MID = ManimColor("#DBEAFE")
-ORANGE_ = ManimColor("#EA580C")
-GREEN_ = ManimColor("#059669")
-GREEN_SOFT = ManimColor("#F0FDF4")
+# palette mirrors 大模型训练/assets/src/claude_style.py
+INK = ManimColor("#1A1A1A")
+MUTED = ManimColor("#6A6A6A")
+FAINT = ManimColor("#D6D0C7")
+STROKE = ManimColor("#4A4A4A")
+BLUE_ = ManimColor("#4F86C0")
+BLUE_SOFT = ManimColor("#A8C5E6")
+BLUE_MID = ManimColor("#8DB2DD")
+ORANGE_ = ManimColor("#D97757")
+GREEN_ = ManimColor("#3F9C86")
+GREEN_SOFT = ManimColor("#9DD4C7")
 FONT = "Microsoft YaHei"
 
 
-def zh(s: str, size: float = 24, color: ManimColor = INK) -> Text:
-    return Text(s, font=FONT, font_size=size, color=color)
+def zh(s: str, size: float = 24, color: ManimColor = INK, weight: str = NORMAL) -> Text:
+    return Text(s, font=FONT, font_size=size, color=color, weight=weight)
 
 
 def tex(s: str, size: float = 34, color: ManimColor = INK) -> MathTex:
@@ -32,13 +34,13 @@ def tex(s: str, size: float = 34, color: ManimColor = INK) -> MathTex:
 
 
 def header(scene: Scene, title: str, subtitle: str) -> VGroup:
-    t = zh(title, 34).to_corner(UL, buff=0.6)
+    t = zh(title, 32, weight=BOLD).to_corner(UL, buff=0.6)
     s = zh(subtitle, 20, MUTED).next_to(t, DOWN, aligned_edge=LEFT, buff=0.2)
     scene.add(t, s)
     return VGroup(t, s)
 
 
-def card(w: float, h: float, fill: ManimColor = BLUE_SOFT, stroke: ManimColor = FAINT,
+def card(w: float, h: float, fill: ManimColor = BLUE_SOFT, stroke: ManimColor = STROKE,
          width: float = 2.5) -> RoundedRectangle:
     return RoundedRectangle(width=w, height=h, corner_radius=0.12, fill_color=fill,
                             fill_opacity=1, stroke_color=stroke, stroke_width=width)
@@ -132,7 +134,7 @@ class RoPE(Scene):
 
 # --------------------------------------------------------- 残差流
 def vec_column(values: list[float], high: ManimColor, cell: float = 0.3) -> VGroup:
-    cells = [Square(cell, fill_color=interpolate_color(WHITE, high, float(np.clip(v, 0.05, 1))),
+    cells = [Square(cell, fill_color=interpolate_color(ManimColor("#FFFFFF"), high, float(np.clip(v, 0.05, 1))),
                     fill_opacity=1, stroke_color=high, stroke_width=1.5) for v in values]
     return VGroup(*cells).arrange(DOWN, buff=0.04)
 
@@ -200,7 +202,7 @@ class ResidualStream(Scene):
 def token_box(s: str, hot: bool = False) -> VGroup:
     label = zh(s, 26)
     w = max(0.75, label.width + 0.4)
-    box = card(w, 0.72, GREEN_SOFT if hot else BLUE_SOFT, GREEN_ if hot else FAINT, 2.5)
+    box = card(w, 0.72, GREEN_SOFT if hot else BLUE_SOFT, STROKE, 2.5)
     return VGroup(box, label.move_to(box))
 
 

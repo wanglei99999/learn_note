@@ -7,6 +7,7 @@ from PIL import Image
 import av
 
 video, dst, fps = sys.argv[1], sys.argv[2], int(sys.argv[3])
+colors = int(sys.argv[4]) if len(sys.argv) > 4 else 64  # raise when a key color gets merged away
 with av.open(video) as container:
     frames = [fr.to_image().convert("RGB") for fr in container.decode(video=0)]
 print("frames", len(frames), "size", frames[0].size)
@@ -16,7 +17,7 @@ w, h = frames[0].size
 probe = Image.new("RGB", (w, h * 3))
 for i, f in enumerate([frames[0], frames[len(frames) // 2], frames[-1]]):
     probe.paste(f, (0, i * h))
-palette = probe.quantize(colors=64, method=Image.Quantize.MEDIANCUT)
+palette = probe.quantize(colors=colors, method=Image.Quantize.MEDIANCUT)
 
 q = [f.quantize(palette=palette, dither=Image.Dither.NONE) for f in frames]
 q[0].save(dst, save_all=True, append_images=q[1:], duration=int(1000 / fps), loop=0, optimize=True)
