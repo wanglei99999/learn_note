@@ -56,7 +56,7 @@ $$
 
 $\pi_{\text{ref}}$ 是参考模型，也就是冻结的 SFT 模型。KL 散度衡量当前模型和 SFT 模型的输出分布差了多远，$\beta$ 控制这项惩罚的力度。
 
-实现上用的是 PPO（Proximal Policy Optimization）算法。它需要同时在显存里放四个模型：
+实现上用的是 PPO（Proximal Policy Optimization，近端策略优化）算法。它需要同时在显存里放四个模型：
 
 ![PPO 训练时的四个模型](assets/rlhf/03-ppo-four-models.png)
 
