@@ -495,6 +495,14 @@ encoder-decoder 里的**交叉注意力**（cross-attention）值得一提：它
 
 几乎每一项改动，都是为了两个目标之一：让模型能稳定地训练得更大，或者让推理更便宜。
 
+对照一下 2017 年论文里的原图：
+
+![原始 Transformer 的结构](assets/transformer/paper-transformer-architecture.png)
+
+*图源：Attention Is All You Need（Vaswani et al., 2017）Figure 1。*
+
+今天的 decoder-only 模型大致相当于只留下右边那一列，再去掉中间连向编码器的那个注意力子层。表里的几处改动在图上也能找到：Add & Norm 放在子层后面（Post-Norm），位置编码在最底下和 embedding 相加一次（正弦绝对位置）。
+
 ## 总结
 
 一个 decoder-only Transformer 做的事情可以概括为：

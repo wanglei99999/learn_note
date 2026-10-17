@@ -122,6 +122,14 @@ PPO 难用是出了名的：四个模型、在线采样、一堆超参数，训�
 
 ![RLHF 与 DPO 的流程对比](assets/rlhf/06-ppo-vs-dpo.png)
 
+DPO 论文开头的对比图：
+
+![DPO 论文中 RLHF 与 DPO 的对比](assets/rlhf/paper-dpo.png)
+
+*图源：Direct Preference Optimization: Your Language Model is Secretly a Reward Model（Rafailov et al., 2023）Figure 1。*
+
+左边是 RLHF：偏好数据先用最大似然训练出奖励模型，奖励模型再和策略模型组成一个强化学习的循环，策略采样回答，奖励模型打分。右边是 DPO：同样的偏好数据，只用一步最大似然直接训练出最终模型，中间的奖励模型和强化学习循环都没有了。两边绿色的 maximum likelihood 是同一类操作，DPO 把整个流程压成了这一步。
+
 ### 4.1 推导
 
 推导只需要三步，用的都是前面已经出现过的式子。
