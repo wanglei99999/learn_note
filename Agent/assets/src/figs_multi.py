@@ -5,7 +5,7 @@ Usage: python figs_multi.py
 from pathlib import Path
 
 from claude_style import (BEIGE, BLUE, CLAY, CLAY_SOFT, GRAY, GRID, INK, LABEL, MUTED, TEAL,
-                          WHITE, line, node, path, rect, save, svg, text, title)
+                          WHITE, line, mono, node, path, rect, save, svg, text, title)
 
 OUT = Path(__file__).resolve().parent.parent / "multi"
 
@@ -58,6 +58,39 @@ def flappy() -> str:
     return svg(W, H, b)
 
 
+# ------------------------------------------------------------- 03 两种做法的账
+def accounting() -> str:
+    W, H = 1240, 600
+    b: list[str] = []
+    title(b, "同一次探索：在主上下文里做，还是交给子 agent（示意）",
+          "探索 10 轮、读入 4 万 token；之后主 agent 还要再跑 30 轮。只计输入 token")
+    x0 = 300
+    sc = 760 / 1_900_000
+    b.append(text(48, 150, "输入 token 合计", 16, INK, "start", weight=700))
+    rows = [("在主上下文里探索", 190, [("探索 10 轮", 680_000, BEIGE), ("之后 30 轮带着 4 万", 1_200_000, CLAY_SOFT)], "188 万 · 0.69 美元"),
+            ("交给子 agent", 260, [("委派", 50_000, GRAY), ("子 agent 10 轮", 245_000, BLUE), ("之后 30 轮带着摘要", 60_000, TEAL)], "36 万 · 0.24 美元")]
+    for name, y, segs, total in rows:
+        b.append(text(x0 - 16, y + 27, name, 15, INK, "end", weight=600))
+        x = x0
+        for lab, v, fill in segs:
+            w = v * sc
+            b.append(rect(x, y, w, 40, fill, "#4a4a4a", 1.5, rx=4))
+            if w > 150:
+                b.append(text(x + w / 2, y + 26, lab, 13, INK))
+            x += w
+        b.append(mono(x + 12, y + 26, total, 14, INK, "start", weight=700))
+    b.append(text(x0, 335, "灰：主 agent 发出委派的那一轮 5 万　蓝：子 agent 自己的 10 轮 24.5 万　绿：之后 30 轮带着摘要 6 万", 12, MUTED, "start"))
+    b.append(text(48, 400, "主上下文峰值", 16, INK, "start", weight=700))
+    sc2 = 760 / 100_000
+    for name, y, v, fill, lab in (("在主上下文里探索", 430, 90_000, CLAY_SOFT, "9 万"),
+                                  ("交给子 agent", 490, 52_000, TEAL, "5.2 万")):
+        b.append(text(x0 - 16, y + 27, name, 15, INK, "end", weight=600))
+        b.append(rect(x0, y, v * sc2, 40, fill, "#4a4a4a", 1.5, rx=4))
+        b.append(mono(x0 + v * sc2 + 12, y + 26, lab, 14, INK, "start", weight=700))
+    return svg(W, H, b)
+
+
 if __name__ == "__main__":
     save(OUT, "01-subagent", subagent())
     save(OUT, "02-flappy", flappy())
+    save(OUT, "03-accounting", accounting())
