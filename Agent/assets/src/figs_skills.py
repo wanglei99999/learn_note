@@ -5,7 +5,7 @@ Usage: python figs_skills.py
 from pathlib import Path
 
 from claude_style import (BEIGE, BLUE, CLAY, CLAY_SOFT, GRAY, GRID, INK, LABEL, MUTED, TEAL,
-                          WHITE, line, mono, rect, save, svg, text, title)
+                          WHITE, line, mono, path, rect, save, svg, text, title)
 
 OUT = Path(__file__).resolve().parent.parent / "skills"
 
@@ -50,5 +50,41 @@ def levels() -> str:
     return svg(W, H, b)
 
 
+# ------------------------------------------------------------- 02 常驻还是做成 skill
+def placement() -> str:
+    W, H = 1200, 640
+    b: list[str] = []
+    title(b, "一段 3,000 token 的说明：常驻还是做成 skill（示意）",
+          "横轴是需要它的任务占比 f，纵轴是每个任务摊到的期望代价；ρ 是需要时模型真的去加载它的概率")
+    x0, x1, y0, y1 = 130, 960, 540, 150
+    vmax = 0.30
+
+    def px(f): return x0 + f * (x1 - x0)
+
+    def py(v): return y0 - min(v, vmax) / vmax * (y0 - y1)
+
+    for v in (0, 0.1, 0.2, 0.3):
+        b.append(line(x0, py(v), x1, py(v), GRID, 1.2))
+        b.append(mono(x0 - 12, py(v) + 5, f"{v:.2f}", 13, LABEL, "end"))
+    for f in (0, 0.25, 0.5, 0.75, 1.0):
+        b.append(mono(px(f), y0 + 26, f"{f:.2f}", 13, LABEL))
+    b.append(text((x0 + x1) / 2, y0 + 58, "需要这段说明的任务占比 f", 14, MUTED, weight=600))
+    b.append(text(48, y1 - 22, "期望代价（美元 / 任务）", 14, MUTED, "start", weight=600))
+    R, L, F = 0.0382, 0.0248, 0.5
+    b.append(line(x0, py(R), x1, py(R), INK, 3, dash="8 5"))
+    b.append(text(px(0.5), py(R) - 10, "常驻：0.038", 14, INK, "start", weight=700))
+    for rho, col in ((0.44, CLAY), (0.8, "#4f86c0"), (0.95, "#3f9c86")):
+        k = (1 - rho) * F + rho * L
+        fe = min(1.0, vmax / k)
+        b.append(line(px(0), py(0), px(fe), py(k * fe), col, 3))
+        fc = R / k
+        b.append(f'<circle cx="{px(fc):.1f}" cy="{py(R):.1f}" r="6" fill="{col}" stroke="#4a4a4a" stroke-width="1.5"/>')
+        b.append(mono(px(fc) - 10, py(R) - 12, f"{fc:.2f}", 13, col, "end", weight=700))
+        lx, ly = (px(fe) + 10, py(k * fe) + 5) if fe < 1 else (x1 + 14, py(k) + 5)
+        b.append(text(lx, ly, f"skill，ρ = {rho}", 14, col, "start", weight=700))
+    return svg(W, H, b)
+
+
 if __name__ == "__main__":
     save(OUT, "01-levels", levels())
+    save(OUT, "02-placement", placement())
