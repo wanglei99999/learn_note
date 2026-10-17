@@ -145,7 +145,81 @@ def harness_map() -> str:
     return svg(W, H, b)
 
 
+# ------------------------------------------------------------- 04 错误回填与成功率
+def recovery() -> str:
+    W, H = 1200, 640
+    b: list[str] = []
+    title(b, "单步成功率 0.9 时，整个任务的成功率（示意）",
+          "d 是失败被看见的概率。失败被看见就能在下一轮补救；看不见的失败会一直带到最后")
+    x0, x1, y0, y1 = 130, 1000, 540, 130
+
+    def px(n: float) -> float:
+        return x0 + (n - 1) / 49 * (x1 - x0)
+
+    def py(v: float) -> float:
+        return y0 - v * (y0 - y1)
+
+    for v in (0, 0.25, 0.5, 0.75, 1.0):
+        b.append(line(x0, py(v), x1, py(v), GRID, 1.2))
+        b.append(mono(x0 - 12, py(v) + 5, f"{v:.2f}", 13, LABEL, "end"))
+    for n in (1, 10, 20, 30, 40, 50):
+        b.append(mono(px(n), y0 + 26, str(n), 13, LABEL))
+    b.append(text((x0 + x1) / 2, y0 + 58, "任务需要的步数 n", 14, MUTED, weight=600))
+    b.append(text(x0 - 12, y1 - 22, "任务成功率", 14, MUTED, "end", weight=600))
+    p, q = 0.9, 0.1
+    for i, d in enumerate((0.95, 0.8, 0.5, 0.0)):
+        s = p / (1 - q * d)
+        pts = " ".join(f"{'M' if n == 1 else 'L'} {px(n):.1f} {py(s ** n):.1f}" for n in range(1, 51))
+        col = [CLAY, "#4f86c0", "#3f9c86", "#8c7c6e"][i]
+        b.append(path(pts, col, 3))
+        b.append(text(x1 + 14, py(s ** 50) + 5, f"d = {d}", 15, col, "start", weight=700))
+    b.append(line(px(20), y0, px(20), y1, LABEL, 1.2, dash="4 4"))
+    for d, yoff in ((0.95, -10), (0.8, -10), (0.5, -10), (0.0, -10)):
+        v = (p / (1 - q * d)) ** 20
+        b.append(mono(px(20) + 8, py(v) + yoff, f"{v:.2f}", 13, INK, "start", weight=700))
+    return svg(W, H, b)
+
+
+# ------------------------------------------------------------- 05 每轮输入
+TURN_IN = [6000, 7100, 11100, 11450, 13250, 13570, 14470, 16070, 16390, 16890]
+
+
+def turn_cost() -> str:
+    W, H = 1100, 630
+    b: list[str] = []
+    title(b, "修 bug 的 10 轮：每一轮发出的输入（示意）",
+          "固定部分 6,000 token 每轮重发，历史逐轮累积；10 轮输入合计 126,290 token")
+    x0, y0, top = 140, 540, 220
+    scale = (y0 - top) / 18000
+    bw, step = 62, 92
+    for v in (0, 6000, 12000, 18000):
+        y = y0 - v * scale
+        b.append(line(x0 - 10, y, x0 + step * 10, y, GRID, 1.2))
+        b.append(mono(x0 - 18, y + 5, f"{v:,}", 13, LABEL, "end"))
+    for k, tot in enumerate(TURN_IN):
+        x = x0 + 14 + k * step
+        hf = 6000 * scale
+        b.append(rect(x, y0 - hf, bw, hf, GRAY, STROKE_C, 1.5, rx=3))
+        hh = (tot - 6000) * scale
+        if hh > 0:
+            b.append(rect(x, y0 - hf - hh, bw, hh, BLUE, STROKE_C, 1.5, rx=3))
+        b.append(mono(x + bw / 2, y0 - tot * scale - 10, f"{tot:,}", 13, INK, weight=700))
+        b.append(mono(x + bw / 2, y0 + 26, str(k + 1), 14, LABEL))
+    b.append(text(x0 + step * 5, y0 + 58, "轮次", 14, MUTED, weight=600))
+    lx, ly = x0, 168
+    b.append(rect(lx, ly, 22, 18, GRAY, STROKE_C, 1.5, rx=3))
+    b.append(text(lx + 32, ly + 14, "固定部分：工具、system、任务", 14, LABEL, "start"))
+    b.append(rect(lx + 320, ly, 22, 18, BLUE, STROKE_C, 1.5, rx=3))
+    b.append(text(lx + 352, ly + 14, "累积的历史：模型的调用 + 工具结果", 14, LABEL, "start"))
+    return svg(W, H, b)
+
+
+STROKE_C = "#4a4a4a"
+
+
 if __name__ == "__main__":
     save(OUT, "01-loop", loop())
     save(OUT, "02-workflows", workflows())
     save(OUT, "03-harness-map", harness_map())
+    save(OUT, "04-recovery", recovery())
+    save(OUT, "05-turn-input", turn_cost())
