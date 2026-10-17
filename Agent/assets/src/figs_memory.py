@@ -5,7 +5,7 @@ Usage: python figs_memory.py
 from pathlib import Path
 
 from claude_style import (BEIGE, BLUE, CLAY, CLAY_SOFT, GRAY, GRID, INK, LABEL, MUTED, TEAL,
-                          WHITE, line, node, path, rect, save, svg, text, title)
+                          WHITE, line, mono, node, path, rect, save, svg, text, title)
 
 OUT = Path(__file__).resolve().parent.parent / "memory"
 
@@ -61,6 +61,45 @@ def lifecycle() -> str:
     return svg(W, H, b)
 
 
+# ------------------------------------------------------------- 03 记忆的有效期
+def decay() -> str:
+    W, H = 1260, 620
+    b: list[str] = []
+    title(b, "一条记忆写下之后，读出来时仍然正确的概率（示意）",
+          "写入时正确的概率 0.95，按各自的半衰期衰减；低于 0.75 时，照着它做的期望收益变成负的")
+    x0, x1, y0, y1 = 130, 1000, 530, 150
+    tmax = 180
+
+    def px(t): return x0 + t / tmax * (x1 - x0)
+
+    def py(v): return y0 - v * (y0 - y1)
+
+    for v in (0, 0.25, 0.5, 0.75, 1.0):
+        b.append(line(x0, py(v), x1, py(v), GRID, 1.2))
+        b.append(mono(x0 - 12, py(v) + 5, f"{v:.2f}", 13, LABEL, "end"))
+    for t in (0, 30, 60, 90, 120, 150, 180):
+        b.append(mono(px(t), y0 + 26, str(t), 13, LABEL))
+    b.append(text((x0 + x1) / 2, y0 + 58, "写入之后经过的天数", 14, MUTED, weight=600))
+    b.append(text(48, y1 - 22, "读出时仍然正确的概率", 14, MUTED, "start", weight=600))
+    b.append(line(x0, py(0.75), x1, py(0.75), INK, 2.5, dash="8 5"))
+    b.append(text(x1 + 14, py(0.75) + 5, "阈值 0.75", 14, INK, "start", weight=700))
+    import math
+    for (name, h, tc), col in zip([("用户偏好，半衰期 365 天", 365, 124.5), ("构建命令，半衰期 90 天", 90, 30.7),
+                                   ("当前分支的状态，半衰期 2 天", 2, 0.7)], [ "#3f9c86", "#4f86c0", CLAY]):
+        pts, t = [], 0.0
+        while t <= tmax:
+            pts.append(f"{'M' if t == 0 else 'L'} {px(t):.1f} {py(0.95 * 2 ** (-t / h)):.1f}")
+            t += 0.25 if t < 10 else 1
+        b.append(path(" ".join(pts), col, 3))
+        b.append(f'<circle cx="{px(tc):.1f}" cy="{py(0.75):.1f}" r="6" fill="{col}" stroke="#4a4a4a" stroke-width="1.5"/>')
+        b.append(text(x1 + 14, py(0.95 * 2 ** (-tmax / h)) + 5, name, 14, col, "start", weight=700))
+    b.append(mono(px(124.5), py(0.75) - 14, "125 天", 13, "#3f9c86", weight=700))
+    b.append(mono(px(30.7), py(0.75) - 14, "31 天", 13, "#4f86c0", weight=700))
+    b.append(mono(px(0.7) + 12, py(0.75) + 26, "0.7 天", 13, CLAY, "start", weight=700))
+    return svg(W, H, b)
+
+
 if __name__ == "__main__":
     save(OUT, "01-tiers", tiers())
     save(OUT, "02-lifecycle", lifecycle())
+    save(OUT, "03-decay", decay())
