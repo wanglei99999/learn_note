@@ -99,6 +99,12 @@ $$
 2. 每个头用自己的那一组，独立做一次 1.3 节的 attention。
 3. $H$ 个头的输出拼接回 $[S,\ d_{\text{model}}]$，再乘一个输出矩阵 $W_O$，进行融合。
 
+![Scaled Dot-Product Attention 与 Multi-Head Attention](assets/attention/paper-attention-mha.png)
+
+*图源：Attention Is All You Need（Vaswani et al., 2017）Figure 2。*
+
+左边是单个头内部的计算，从下往上就是 1.3 节的四步：$QK^\top$（MatMul）、除以 $\sqrt{d_{\text{head}}}$（Scale）、可选的 mask、softmax，最后乘 $V$。Mask 那一步标着 opt.，第 3 节的因果注意力就是在这里加的。右边是多头：V、K、Q 各过一个 Linear 投影，叠起来的阴影表示有 $h$ 份，各自做一次左边的计算，再 Concat 拼接，最后一个 Linear 就是 $W_O$。论文里每个头画成一个独立的投影，和上面“先投影再切成 $H$ 份”是同一件事，实现上通常用一个大矩阵一次算完再切。
+
 第 5 节公式里的"每头维度 $D$"，指的就是这里的 $d_{\text{head}}$。
 
 ### 2.3 MHA、GQA、MQA
@@ -106,6 +112,14 @@ $$
 既然 K、V 要缓存，那么 KV 头越多，缓存越大。于是出现了让多个 Q 头共用一组 K、V 的做法：
 
 ![MHA / GQA / MQA 对比](assets/kv-cache/04-mha-gqa-mqa.png)
+
+GQA 论文里的原图：
+
+![论文中 MHA、GQA、MQA 的对比](assets/kv-cache/paper-gqa.png)
+
+*图源：GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints（Ainslie et al., 2023）Figure 2。*
+
+三种方式的 Query 都是 8 个头。左边 MHA 每个 Query 有自己的 Key 和 Value；右边 MQA 所有 Query 共用一组；中间 GQA 每 2 个 Query 共用一组，一共 4 组 K、V。
 
 | 方式 | Q 头数 | KV 头数 | KV Cache 相对大小 | 代表模型 |
 |---|---|---|---|---|
