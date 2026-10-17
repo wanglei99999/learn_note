@@ -57,6 +57,41 @@ def coevolve() -> str:
     return svg(W, H, b)
 
 
+# ------------------------------------------------------------- 03 有学习信号的任务占比
+def signal() -> str:
+    W, H = 1220, 620
+    b: list[str] = []
+    title(b, "一个任务采样 G 条轨迹，至少有一条成功、一条失败的概率",
+          "全对或全错时组内优势全为 0，这个任务不产生梯度；太难和太简单的任务都浪费采样")
+    x0, x1, y0, y1 = 130, 1000, 530, 150
+
+    def px(v): return x0 + v * (x1 - x0)
+
+    def py(v): return y0 - v * (y0 - y1)
+
+    for v in (0, 0.25, 0.5, 0.75, 1.0):
+        b.append(line(x0, py(v), x1, py(v), GRID, 1.2))
+        b.append(mono(x0 - 12, py(v) + 5, f"{v:.2f}", 13, LABEL, "end"))
+        b.append(mono(px(v), y0 + 26, f"{v:.2f}", 13, LABEL))
+    b.append(text((x0 + x1) / 2, y0 + 58, "模型在这个任务上的成功率 p", 14, MUTED, weight=600))
+    b.append(text(48, y1 - 22, "产生学习信号的概率", 14, MUTED, "start", weight=600))
+    for G, col in ((4, "#8c7c6e"), (8, "#4f86c0"), (16, CLAY)):
+        pts = []
+        for i in range(0, 201):
+            q = i / 200
+            v = 1 - q ** G - (1 - q) ** G
+            pts.append(f"{'M' if i == 0 else 'L'} {px(q):.1f} {py(v):.1f}")
+        b.append(path(" ".join(pts), col, 3))
+    for i, (G, col) in enumerate(((16, CLAY), (8, "#4f86c0"), (4, "#8c7c6e"))):
+        b.append(line(1030, 220 + i * 32, 1070, 220 + i * 32, col, 3))
+        b.append(text(1080, 225 + i * 32, f"G = {G}", 14, col, "start", weight=700))
+    b.append(f'<circle cx="{px(0.05):.1f}" cy="{py(0.337):.1f}" r="6" fill="#4f86c0" stroke="#4a4a4a" stroke-width="1.5"/>')
+    b.append(line(px(0.05) + 4, py(0.337) + 6, px(0.11), py(0.17), LABEL, 1.2))
+    b.append(mono(px(0.115), py(0.15), "p = 0.05，G = 8：只有 34% 的任务有信号", 13, "#4f86c0", "start", weight=700))
+    return svg(W, H, b)
+
+
 if __name__ == "__main__":
     save(OUT, "01-rollout", rollout())
     save(OUT, "02-coevolve", coevolve())
+    save(OUT, "03-signal", signal())
