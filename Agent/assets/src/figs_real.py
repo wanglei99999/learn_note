@@ -51,5 +51,37 @@ def architecture() -> str:
     return svg(W, H, b)
 
 
+# ------------------------------------------------------------- 02 一次会话
+def trace() -> str:
+    W, H = 1240, 620
+    b: list[str] = []
+    title(b, "修一个 bug 的会话里，各个部件在什么时候起作用",
+          "上面一行是模型做的决定，下面是 harness 在同一时刻做的事；数字是本系列讲它的那一篇")
+    steps = ["会话开始", "派子 agent 定位", "读文件", "编辑", "跑测试", "想要结束"]
+    model = ["读任务", "写委派说明", "决定读哪几个", "写 old/new 字符串", "决定跑哪些测试", "end_turn"]
+    harness = [["加载 CLAUDE.md", "skill 描述", "工具定义（部分延迟）"], ["新上下文", "只回传摘要"], ["记下读取时的版本"],
+               ["文件改过则拒绝", "PostToolUse：lint"], ["权限规则放行", "沙箱内执行"], ["Stop hook 跑测试", "不过则继续"]]
+    nums = [["07", "06", "02"], ["09", "09"], ["05"], ["05", "04"], ["11", "11"], ["04", "04"]]
+    x0, cw, gap = 40, 186, 8
+    b.append(text(x0, 150, "模型", 14, MUTED, "start", weight=700))
+    b.append(text(x0, 290, "harness", 14, MUTED, "start", weight=700))
+    for i, st in enumerate(steps):
+        x = x0 + i * (cw + gap)
+        b.append(rect(x, 160, cw, 90, BLUE, rx=10, sw=2))
+        b.append(text(x + cw / 2, 190, st, 15, INK, weight=700))
+        b.append(text(x + cw / 2, 220, model[i], 13, LABEL))
+        b.append(line(x + cw / 2, 252, x + cw / 2, 296, GRID, 2))
+        for j, (h, n) in enumerate(zip(harness[i], nums[i])):
+            y = 300 + j * 82
+            b.append(rect(x, y, cw, 70, BEIGE, rx=10, sw=1.8))
+            b.append(text(x + 12, y + 42, h, 13, INK, "start"))
+            b.append(rect(x + cw - 42, y + 8, 32, 20, CLAY_SOFT, CLAY, 1.2, rx=5))
+            b.append(text(x + cw - 26, y + 23, n, 12, CLAY, weight=700))
+    b.append(line(x0, 268, x0 + 6 * (cw + gap) - gap, 268, CLAY, 2, arrow=True, clay=True))
+    b.append(text(620, 590, "判断留给模型：读什么、改什么、何时结束；边界交给程序：版本校验、lint、权限、沙箱、结束前的测试", 14, CLAY, weight=600))
+    return svg(W, H, b)
+
+
 if __name__ == "__main__":
     save(OUT, "01-architecture", architecture())
+    save(OUT, "02-trace", trace())
