@@ -5,7 +5,7 @@ Usage: python figs_eval.py
 from pathlib import Path
 
 from claude_style import (BEIGE, BLUE, CLAY, CLAY_SOFT, GRAY, GRID, INK, LABEL, MUTED, SERIES, TEAL,
-                          WHITE, Axes, circle, line, node, path, rect, save, svg, text, title)
+                          WHITE, Axes, circle, line, mono, node, path, rect, save, svg, text, title)
 
 OUT = Path(__file__).resolve().parent.parent / "eval"
 
@@ -54,6 +54,38 @@ def passk() -> str:
     return svg(W, H, b)
 
 
+# ------------------------------------------------------------- 03 需要多少个任务
+def sample_size() -> str:
+    W, H = 1220, 640
+    b: list[str] = []
+    title(b, "要看出一次改动的效果，需要多少个任务（示意）",
+          "显著性 0.05、检出把握 80%；独立比较以 50% 为基线，成对比较假设每次改动让 2% 的任务变差")
+    ax = Axes(150, 130, 860, 400, (0.03, 0.3), (10, 5000), xlog=True, ylog=True)
+    b += ax.frame([(0.03, "3"), (0.05, "5"), (0.1, "10"), (0.2, "20"), (0.3, "30")],
+                  [(10, "10"), (50, "50"), (100, "100"), (500, "500"), (1000, "1,000"), (5000, "5,000")],
+                  "改动带来的成功率提升（百分点，对数刻度）", "需要的任务数（对数刻度）")
+    z2 = (1.96 + 0.8416) ** 2
+    un, pa = [], []
+    d = 0.03
+    while d <= 0.3001:
+        p1, p2 = 0.5, min(0.5 + d, 0.999)
+        un.append((d, min(5000, z2 * (p1 * (1 - p1) + p2 * (1 - p2)) / d ** 2)))
+        p10, p01 = 0.02, 0.02 + d
+        pa.append((d, max(10, min(5000, z2 * (p01 + p10) / d ** 2))))
+        d *= 1.03
+    b.append(ax.curve(un, CLAY, 3))
+    b.append(ax.curve(pa, "#4f86c0", 3))
+    b.append(line(1030, 200, 1070, 200, CLAY, 3))
+    b.append(text(1080, 205, "独立比较", 14, CLAY, "start", weight=700))
+    b.append(line(1030, 232, 1070, 232, "#4f86c0", 3))
+    b.append(text(1080, 237, "成对比较", 14, "#4f86c0", "start", weight=700))
+    b.append(line(ax.px(0.05), ax.py(10), ax.px(0.05), ax.py(5000), LABEL, 1.2, dash="4 4"))
+    b.append(mono(ax.px(0.05) + 8, ax.py(1560) - 8, "≈1,560", 13, CLAY, "start", weight=700))
+    b.append(mono(ax.px(0.05) + 8, ax.py(280) + 20, "≈280", 13, "#4f86c0", "start", weight=700))
+    return svg(W, H, b)
+
+
 if __name__ == "__main__":
     save(OUT, "01-anatomy", anatomy())
     save(OUT, "02-passk", passk())
+    save(OUT, "03-sample-size", sample_size())
