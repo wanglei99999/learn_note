@@ -70,6 +70,55 @@ def horizon() -> str:
     return svg(W, H, b)
 
 
+# ------------------------------------------------------------- 03 工作单元的大小
+def unit_size() -> str:
+    from math import erf, exp, log, sqrt
+    W, H = 1200, 640
+    b: list[str] = []
+    title(b, "每个会话做一个工作单元：单元该多大（示意）",
+          "窗口可用 15 万 token，开场固定花 1.5 万；单元大小有波动，超出窗口的单元整个回滚重做")
+    cap, o, sig = 135_000, 15_000, 0.6
+
+    def Phi(z): return 0.5 * (1 + erf(z / sqrt(2)))
+
+    def ev(med):
+        mu = log(med)
+        q = Phi((log(cap) - mu) / sig)
+        m1 = exp(mu + sig ** 2 / 2) * Phi((log(cap) - mu - sig ** 2) / sig)
+        return m1 / (o + m1 + cap * (1 - q)), q
+
+    x0, x1, y0, y1 = 130, 1000, 540, 150
+
+    def px(m): return x0 + m / 120_000 * (x1 - x0)
+
+    def py(v): return y0 - v * (y0 - y1)
+
+    for v in (0, 0.25, 0.5, 0.75, 1.0):
+        b.append(line(x0, py(v), x1, py(v), GRID, 1.2))
+        b.append(mono(x0 - 12, py(v) + 5, f"{v:.2f}", 13, LABEL, "end"))
+    for m in (0, 20_000, 40_000, 60_000, 80_000, 100_000, 120_000):
+        b.append(mono(px(m), y0 + 26, f"{m // 1000}k", 13, LABEL))
+    b.append(text((x0 + x1) / 2, y0 + 58, "工作单元的中位大小（token）", 14, MUTED, weight=600))
+    effs, qs = [], []
+    m = 2_000
+    while m <= 120_000:
+        e, q = ev(m)
+        effs.append(f"{'M' if m == 2_000 else 'L'} {px(m):.1f} {py(e):.1f}")
+        qs.append(f"{'M' if m == 2_000 else 'L'} {px(m):.1f} {py(q):.1f}")
+        m += 1_000
+    b.append(path(" ".join(qs), "#4f86c0", 3, dash="8 5"))
+    b.append(path(" ".join(effs), CLAY, 3))
+    e, q = ev(42_000)
+    b.append(line(px(42_000), y0, px(42_000), py(e), LABEL, 1.2, dash="4 4"))
+    b.append(f'<circle cx="{px(42_000):.1f}" cy="{py(e):.1f}" r="6" fill="{CLAY}" stroke="#4a4a4a" stroke-width="1.5"/>')
+    b.append(mono(px(42_000) + 10, py(e) - 12, "42k：有效占比 0.71", 13, CLAY, "start", weight=700))
+    b.append(text(x1 + 14, py(ev(120_000)[0]) + 5, "有效占比", 14, CLAY, "start", weight=700))
+    b.append(text(x1 + 14, py(ev(120_000)[1]) + 5, "一次做完的概率", 14, "#4f86c0", "start", weight=700))
+    b.append(text(px(6_000), py(0.12), "单元太小：开场开销占大头", 13, MUTED, "start"))
+    return svg(W, H, b)
+
+
 if __name__ == "__main__":
     save(OUT, "01-relay", relay())
     save(OUT, "02-horizon", horizon())
+    save(OUT, "03-unit", unit_size())
