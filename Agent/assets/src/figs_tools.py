@@ -93,6 +93,62 @@ def mcp() -> str:
     return svg(W, H, b)
 
 
+# ------------------------------------------------------------- 03 并行调用与 id 配对
+def parallel() -> str:
+    W, H = 1240, 600
+    b: list[str] = []
+    title(b, "并行调用：三个 tool_use，三个 tool_result，靠 id 配对",
+          "执行可以乱序完成，其中一个失败也要返回一条结果；下一次请求里，每个 id 都必须有对应的结果")
+    b.append(rect(40, 110, 560, 440, WHITE, GRID, 1.5, rx=14))
+    b.append(text(60, 142, "assistant 消息（模型输出）", 15, MUTED, "start", weight=700))
+    calls = [("t1", "上海"), ("t2", "北京"), ("t3", "拉萨")]
+    for i, (tid, city) in enumerate(calls):
+        y = 166 + i * 70
+        b.append(rect(60, y, 520, 54, BLUE, rx=8, sw=1.5))
+        b.append(mono(80, y + 33, f'tool_use  id={tid}  get_weather(city="{city}")', 14, INK, "start"))
+    b.append(rect(640, 110, 560, 440, WHITE, GRID, 1.5, rx=14))
+    b.append(text(660, 142, "下一条 user 消息（harness 组装）", 15, MUTED, "start", weight=700))
+    res = [("t2", '{"temp": 9, "sky": "晴"}', TEAL, "先返回"),
+           ("t1", '{"temp": 18, "sky": "小雨"}', TEAL, ""),
+           ("t3", "is_error: 城市不在支持范围内", CLAY_SOFT, "失败也要回")]
+    for i, (tid, body, fill, note) in enumerate(res):
+        y = 166 + i * 70
+        b.append(rect(660, y, 520, 54, fill, CLAY if fill == CLAY_SOFT else "#4a4a4a", 1.5, rx=8))
+        b.append(mono(680, y + 33, f"tool_result  id={tid}  {body}", 13, INK, "start"))
+    for (src, dst) in ((0, 1), (1, 0), (2, 2)):
+        b.append(line(582, 193 + src * 70, 656, 193 + dst * 70, LABEL, 1.8, arrow=True))
+    b.append(text(60, 420, "· 结果的顺序可以和调用不同，模型靠 id 对应", 14, LABEL, "start"))
+    b.append(text(60, 448, "· 漏掉任何一个 id，下一次请求会被 API 拒绝", 14, LABEL, "start"))
+    b.append(text(60, 476, "· 失败用 is_error 标记，错误信息就是模型下一步的输入", 14, LABEL, "start"))
+    b.append(text(60, 504, "· 三个结果放在同一条消息里：少两次往返，少两遍全量重发", 14, LABEL, "start"))
+    return svg(W, H, b)
+
+
+# ------------------------------------------------------------- 04 粒度与 token
+def granularity() -> str:
+    W, H = 1240, 500
+    b: list[str] = []
+    title(b, "工具粒度决定 token 消耗（示意）",
+          "左：找一个联系人；右：约一个会。上下文按 2 万 token 计，每多一轮调用就要多发一遍全部上下文")
+    def bars(x0, items, maxv, unit):
+        for i, (lab, v, fill, note) in enumerate(items):
+            y = 210 + i * 120
+            w = v / maxv * 400
+            b.append(text(x0, y - 10, lab, 15, INK, "start", weight=700))
+            b.append(rect(x0, y, max(w, 4), 44, fill, "#4a4a4a", 1.5, rx=6))
+            b.append(mono(x0 + max(w, 4) + 10, y + 28, f"{v:,} {unit}", 14, INK, "start"))
+            b.append(text(x0, y + 72, note, 13, MUTED, "start"))
+    b.append(text(60, 140, "返回给模型的 token", 15, MUTED, "start", weight=700))
+    bars(60, [("list_contacts：返回全部 2,000 人", 60_000, CLAY, "每人约 30 token，模型自己在里面找"),
+              ("search_contacts(name=\"张伟\")：返回 3 人", 100, TEAL, "程序替模型做了筛选")], 60_000, "token")
+    b.append(text(660, 140, "完成任务的总输入 token", 15, MUTED, "start", weight=700))
+    bars(660, [("list_users → list_events × 2 → create_event", 80_000, CLAY, "4 次调用，每次都带上约 2 万 token 的上下文"),
+               ("schedule_event(参会人, 时长, 时间范围)", 20_000, TEAL, "1 次调用，找空档和建会都在工具内部完成")], 80_000, "token")
+    return svg(W, H, b)
+
+
 if __name__ == "__main__":
     save(OUT, "01-round-trip", round_trip())
     save(OUT, "02-mcp", mcp())
+    save(OUT, "03-parallel", parallel())
+    save(OUT, "04-granularity", granularity())
