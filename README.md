@@ -15,4 +15,4 @@
 - **[LLM部署/](LLM部署/大模型推理与昇腾部署学习笔记.md)** — 大模型推理、vLLM、昇腾部署学习笔记与 MoE 配图
 - **[深度学习/](深度学习/README.md)** — 深度学习原理笔记：神经网络基础（激活函数 → 损失与反向传播 → 优化器），Transformer 与大模型（Attention 入门 → Transformer 结构 → KV Cache → Encoder-Decoder），大模型训练（预训练与 Scaling Law → SFT → RLHF/DPO → 推理模型 → LoRA），生成模型与数据几何（流形假说、WGAN、扩散模型与 Flow Matching）
 - **[Agent/](Agent/README.md)** — Agent 原理系列，深度学习的姊妹篇：一次 API 调用 → 工具调用 → Agent 循环与 Harness → 反馈与验证 → 上下文工程 → Skills → 记忆 → 长时任务 → 子 agent 与多 agent → 模型这一侧 → 安全与权限 → 评估 → 拆解 Claude Code
-- **[Agent基础设施/](Agent基础设施/README.md)** — 服务端 agent 运行时原理系列，Agent 系列的下一层：服务端 agent 运行时 → harness 的位置 → 执行通道 → 持久化执行 → 崩溃后的旧进程 → 沙箱检查点 → 沙箱后端，附 Tether 项目日志
+- **[Agent基础设施/](Agent基础设施/README.md)** — 服务端 agent 运行时原理系列，Agent 系列的下一层：服务端 agent 运行时 → harness 的位置 → 执行通道 → 持久化执行 → 崩溃后的旧进程 → 沙箱检查点 → 沙箱后端
